@@ -1,0 +1,45 @@
+templates/index.html
+  s_bcebec9f715f38::t_4324fdb6f74a90 176-182
+  s_bcebec9f715f38::t_c9ef12cfb06f4a 174
+templates/practice.html
+  s_bcebec9f715f38::t_4922e80c848ba2 68
+app.py
+  s_bcebec9f715f38::t_b425e73995237a 3287-3291,3297,3306-3308,3363
+  s_bcebec9f715f38::t_c8b3fdefcdf678 3670,3731,3772,4332
+  s_bcebec9f715f38::t_74574455b93456 2536-2539,2541-2545,2551-2597
+  s_bcebec9f715f38::t_82ffee7d374d59 4219-4223,4226-4227,4299-4303,4308-4311,4318,4320-4324
+  s_bcebec9f715f38::t_2955b035b759d6 4334-4338,4341-4342
+  s_bcebec9f715f38::t_0e8062c1ec6d54 4292-4293
+  s_bcebec9f715f38::t_d24bdb9591bc3f 4365-4368,4371-4372
+  s_bcebec9f715f38::t_fb7150794e7778 2540,2546-2550,4288,4312-4317
+  s_bcebec9f715f38::t_bca6899a3e8e77 3567
+  s_bcebec9f715f38::t_7f056b90acec2c 4319,4340
+  s_bcebec9f715f38::t_c098258dda3ceb 4327-4328,4339,4343
+static/styles.css
+  s_bcebec9f715f38::t_b7611d760adaca 1318,1320
+  s_bcebec9f715f38::t_a963f473c59ce6 235-238
+static/library.js
+  s_bcebec9f715f38::t_b9d634f1d3ad59 237-260,342-347
+README.zh-CN.md
+  s_bcebec9f715f38::t_34473980bb9101 162
+  s_bcebec9f715f38::t_a206c96526bb43 161
+README.md
+  s_bcebec9f715f38::t_e20559a094699f 161
+  s_bcebec9f715f38::t_c17383445dfc79 162
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f7e1bfc96112504e9bdd90c5bfe2160ac811d329",
+  "prompts": {},
+  "sessions": {
+    "s_bcebec9f715f38": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1204-4078-7b42-9279-491589dd2015",
+        "model": "gpt-5.5"
+      },
+      "human_author": "williamoel <2797915706@qq.com>"
+    }
+  }
+}
