@@ -1,6 +1,6 @@
 # typeng
 
-中文用户可以查看中文版README：[README](README.zh-CN.md)
+[README](README.zh-CN.md)
 
 typeng is a local-first English vocabulary typing trainer built with Python, Flask, SQLite, and a browser-based interface.
 
