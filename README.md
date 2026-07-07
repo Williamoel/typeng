@@ -158,6 +158,8 @@ See [PACKAGING.md](PACKAGING.md) for the planned PyInstaller-based Windows packa
 
 typeng supports TXT and CSV imports.
 
+In the `Add Words` panel, users can enter only a word, or a word plus part of speech. If local ECDICT data is available, typeng tries to fill the matching Chinese meaning automatically. When only the word is provided, typeng expands it into separate entries by ECDICT part of speech. `Add Words` does not overwrite an existing entry with the same word and part of speech; edit existing entries from the library table instead. File imports should still use the standard format below.
+
 Required fields:
 
 - `word`

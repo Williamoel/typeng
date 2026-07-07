@@ -2533,6 +2533,68 @@ def parse_ecdict_csv(
     return grouped, errors
 
 
+def ecdict_entries_for_word(
+    word: str,
+    part_of_speech: str = "",
+    meaning: str = "",
+    raw: bytes | None = None,
+) -> list[dict[str, object]]:
+    word_key = word.strip().lower()
+    if not word_key:
+        return []
+
+    if raw is None:
+        try:
+            raw = load_ecdict_data()
+        except Exception:
+            return []
+
+    requested_part = normalize_user_pos(part_of_speech.strip()) if part_of_speech else ""
+    text = raw.decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(text))
+    merged: dict[str, dict[str, object]] = {}
+    for row in reader:
+        normalized = {(key or "").strip().lower(): (value or "").strip() for key, value in row.items()}
+        if normalized.get("word", "").lower() != word_key:
+            continue
+
+        fallback_pos = infer_ecdict_fallback_pos(normalized)
+        translations = split_ecdict_translation(normalized.get("translation", ""), fallback_pos)
+        for entry_part, entry_meaning in translations:
+            part = normalize_user_pos(entry_part)
+            if requested_part and part != requested_part:
+                continue
+            if not entry_meaning and not meaning:
+                continue
+            existing = merged.setdefault(
+                part,
+                {
+                    "word": normalized.get("word") or word,
+                    "part_of_speech": part,
+                    "meaning_parts": [],
+                    "phonetic": normalized.get("phonetic") or None,
+                    "definition": format_ecdict_definition(normalized.get("definition", "")) or None,
+                    "frequency": normalize_ecdict_frequency(normalized),
+                    "source": "ECDICT",
+                    "source_tags": normalized.get("tag") or None,
+                },
+            )
+            if entry_meaning:
+                existing["meaning_parts"].append(entry_meaning)
+
+    entries: list[dict[str, object]] = []
+    for part, entry in merged.items():
+        selected_meaning = meaning or merge_text_values(*(entry.pop("meaning_parts") or []))
+        if selected_meaning:
+            entry["meaning"] = selected_meaning
+            entries.append(entry)
+
+    if requested_part and meaning and not entries:
+        entries.append({"word": word, "part_of_speech": requested_part, "meaning": meaning})
+
+    return entries
+
+
 def load_ecdict_data() -> bytes:
     if BUNDLED_ECDICT_PATH.exists():
         return BUNDLED_ECDICT_PATH.read_bytes()
@@ -3222,12 +3284,17 @@ def enrich_entries_from_ecdict(entries: list[dict[str, str]]) -> int:
     return enriched
 
 
-def import_entries(entries: list[dict[str, str]], library_id: int | None = None) -> tuple[int, int]:
+def import_entries(
+    entries: list[dict[str, str]],
+    library_id: int | None = None,
+    update_existing: bool = True,
+) -> tuple[int, int, int]:
     db = get_db()
     if library_id is None:
         library_id = get_active_library_id()
     inserted = 0
     updated = 0
+    skipped = 0
 
     for entry in entries:
         entry["part_of_speech"] = normalize_user_pos(str(entry["part_of_speech"]))
@@ -3236,6 +3303,9 @@ def import_entries(entries: list[dict[str, str]], library_id: int | None = None)
             (library_id, entry["word"], entry["part_of_speech"]),
         ).fetchone()
         if existing:
+            if not update_existing:
+                skipped += 1
+                continue
             db.execute(
                 """
                 UPDATE words
@@ -3290,7 +3360,7 @@ def import_entries(entries: list[dict[str, str]], library_id: int | None = None)
             inserted += 1
 
     db.commit()
-    return inserted, updated
+    return inserted, updated, skipped
 
 
 def fetch_words(status: str | None = None) -> list[sqlite3.Row]:
@@ -3494,6 +3564,7 @@ def index():
         sort_modes={"frequency": "Frequency", "alpha": "A-Z"},
         comparable_libraries=comparable_libraries,
         part_of_speech_options=PART_OF_SPEECH_OPTIONS,
+        add_word_messages=session.pop("add_word_messages", []),
         hide_global_stats=True,
         **base_context(),
     )
@@ -3596,7 +3667,7 @@ def import_words():
     enriched = 0
     if entries:
         enriched = enrich_entries_from_ecdict(entries)
-        inserted, updated = import_entries(entries)
+        inserted, updated, _skipped = import_entries(entries)
         suffix = f" ECDICT filled {enriched} entries." if enriched else ""
         flash(f"Imported {inserted} new words and updated {updated} existing entries.{suffix}", "success")
     if errors:
@@ -3657,7 +3728,7 @@ def import_ecdict():
         reset_ecdict_library(library_id)
         if first_library_id is None:
             first_library_id = library_id
-        inserted, updated = import_entries(entries, library_id=library_id)
+        inserted, updated, _skipped = import_entries(entries, library_id=library_id)
         summaries.append(f"{library_name}: {inserted} added, {updated} updated")
 
     if first_library_id is not None:
@@ -3698,7 +3769,7 @@ def create_ecdict_preset():
 
     library_id = get_or_create_library(library_name)
     reset_ecdict_library(library_id)
-    inserted, updated = import_entries(entries, library_id=library_id)
+    inserted, updated, _skipped = import_entries(entries, library_id=library_id)
     session["active_library_id"] = library_id
     clear_practice_session()
     flash(f"{library_name} library rebuilt: {inserted} added, {updated} updated.", "success")
@@ -3873,7 +3944,6 @@ def practice():
         show_definition=bool(session.get("show_definition", False)),
         show_phonetic=bool(session.get("show_phonetic", True)),
         cloze_text=cloze_text,
-        cloze_word_count=english_word_count(cloze_text),
         cloze_answer=cloze_answer(word["example_sentence"], word["word"]),
         missed_count=len(session.get("missed_ids", [])),
         practice_round=int(session.get("practice_round", 1)),
@@ -4146,9 +4216,15 @@ def wrong():
 
 @app.post("/words/<int:word_id>/edit")
 def edit_word(word_id: int):
+    existing_word = fetch_word(word_id)
+    if existing_word is None:
+        flash("Word not found.", "error")
+        return redirect(request.referrer or url_for("index"))
+
     word = request.form.get("word", "").strip()
     part_of_speech = normalize_user_pos(request.form.get("part_of_speech", "").strip())
-    meaning = request.form.get("meaning", "").strip()
+    raw_meaning = request.form.get("meaning", "").strip()
+    meaning = raw_meaning or existing_word["meaning"]
     example_sentence = request.form.get("example_sentence", "").strip()
 
     if not word or not part_of_speech or not meaning:
@@ -4209,37 +4285,62 @@ def add_word():
     max_rows = max(len(words), len(parts), len(meanings), len(examples))
     entries = []
     errors = []
+    ecdict_raw: bytes | None = None
 
     for index in range(max_rows):
         word = words[index].strip() if index < len(words) else ""
-        part_of_speech = normalize_user_pos(parts[index].strip()) if index < len(parts) else ""
+        raw_part = parts[index].strip() if index < len(parts) else ""
+        part_of_speech = normalize_user_pos(raw_part) if raw_part else ""
         meaning = meanings[index].strip() if index < len(meanings) else ""
         example_sentence = examples[index].strip() if index < len(examples) else ""
 
         if not word and not part_of_speech and not meaning and not example_sentence:
             continue
-        if not word or not part_of_speech or not meaning:
-            errors.append(f"Row {index + 1} is incomplete.")
+        if not word:
+            errors.append(f"Row {index + 1}: word is required.")
+            continue
+        if meaning and not part_of_speech:
+            errors.append(f"Row {index + 1}: part of speech is required when a custom meaning is provided.")
             continue
         if example_sentence and not valid_example_sentence(example_sentence, word):
             errors.append(f"Row {index + 1}: example sentence must contain the target word.")
             continue
-        entry = {"word": word, "part_of_speech": part_of_speech, "meaning": meaning}
-        if example_sentence:
-            entry["example_sentence"] = example_sentence
-        entries.append(entry)
+        row_entries: list[dict[str, object]] = []
+        if part_of_speech and meaning:
+            row_entries = [{"word": word, "part_of_speech": part_of_speech, "meaning": meaning}]
+        else:
+            if ecdict_raw is None:
+                try:
+                    ecdict_raw = load_ecdict_data()
+                except Exception:
+                    ecdict_raw = b""
+            row_entries = ecdict_entries_for_word(word, part_of_speech, meaning, raw=ecdict_raw or None)
+            if not row_entries:
+                errors.append(f"Row {index + 1}: '{word}' was not found in ECDICT. Add part of speech and Chinese meaning manually.")
+                continue
+        for entry in row_entries:
+            if example_sentence:
+                entry["example_sentence"] = example_sentence
+            entries.append(entry)
 
-    if errors:
-        flash(" ".join(errors[:3]), "error")
-        return redirect(url_for("index", edit=1))
     if not entries:
-        flash("Add at least one complete word row.", "error")
+        message = " ".join(errors[:3]) if errors else "Add at least one word row."
+        session["add_word_messages"] = [("error", message)]
         return redirect(url_for("index", edit=1))
 
     enriched = enrich_entries_from_ecdict(entries)
-    inserted, updated = import_entries(entries)
+    inserted, updated, skipped = import_entries(entries, update_existing=False)
     suffix = f" ECDICT filled {enriched} entries." if enriched else ""
-    flash(f"Added {inserted} new words and updated {updated} existing entries.{suffix}", "success")
+    messages = []
+    if inserted:
+        messages.append(("success", f"Added {inserted} new words.{suffix}"))
+    if skipped:
+        messages.append(("success", f"{skipped} existing entries were already in this library and were left unchanged."))
+    if errors:
+        messages.append(("error", f"These rows were not added: {' '.join(errors[:3])}"))
+    if not messages:
+        messages.append(("error", "No new words were added."))
+    session["add_word_messages"] = messages
     return redirect(url_for("index", edit=1))
 
 
@@ -4261,9 +4362,14 @@ def save_page_edits():
     seen_keys: set[tuple[str, str]] = set()
 
     for word_id in selected_ids:
+        existing_word = fetch_word(word_id)
+        if existing_word is None:
+            errors.append(f"Word {word_id}: word not found.")
+            continue
         word = request.form.get(f"word_{word_id}", "").strip()
         part_of_speech = normalize_user_pos(request.form.get(f"part_of_speech_{word_id}", "").strip())
-        meaning = request.form.get(f"meaning_{word_id}", "").strip()
+        raw_meaning = request.form.get(f"meaning_{word_id}", "").strip()
+        meaning = raw_meaning or existing_word["meaning"]
         example_sentence = request.form.get(f"example_sentence_{word_id}", "").strip()
 
         if not word or not part_of_speech or not meaning:

@@ -234,6 +234,30 @@
     });
   }
 
+  function fitClozePrompt() {
+    const prompt = document.querySelector(".cloze-prompt.inline-cloze");
+    if (!prompt) {
+      return;
+    }
+
+    prompt.style.removeProperty("--cloze-font-size");
+    const computed = window.getComputedStyle(prompt);
+    const baseSize = Number.parseFloat(computed.fontSize) || 52;
+    const minSize = 22;
+    const maxLines = 3;
+
+    function allowedHeight() {
+      const lineHeight = Number.parseFloat(window.getComputedStyle(prompt).lineHeight) || baseSize * 1.35;
+      return lineHeight * maxLines + 1;
+    }
+
+    let size = baseSize;
+    while (size > minSize && prompt.scrollHeight > allowedHeight()) {
+      size -= 1;
+      prompt.style.setProperty("--cloze-font-size", `${size}px`);
+    }
+  }
+
   function optionFormKey(form, index) {
     const action = form.getAttribute("action") || window.location.pathname;
     return `${OPTION_STORAGE_PREFIX}${window.location.pathname}:${action}:${index}`;
@@ -315,6 +339,12 @@
     bindExcludeForm();
     bindClozeOptions();
     restorePracticeOptions();
+    fitClozePrompt();
+    centerPracticeView();
+  });
+
+  window.addEventListener("resize", () => {
+    fitClozePrompt();
     centerPracticeView();
   });
 })();

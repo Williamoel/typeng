@@ -232,6 +232,10 @@ select {
   border-color: #bbf7d0;
 }
 
+.local-messages {
+  margin: 0 0 14px;
+}
+
 .panel,
 .table-section {
   background: var(--surface);
@@ -1311,14 +1315,9 @@ h2 {
   width: min(100%, 860px);
   margin: 20px auto 16px;
   color: var(--ink);
-  font-size: clamp(28px, 4vw, 52px);
+  font-size: var(--cloze-font-size, clamp(28px, 4vw, 52px));
   line-height: 1.35;
-}
-
-.practice-card .cloze-prompt.long-cloze {
-  width: min(100%, 940px);
-  font-size: clamp(21px, 2.4vw, 34px);
-  line-height: 1.45;
+  overflow: visible;
 }
 
 .cloze-meaning {
@@ -1366,10 +1365,6 @@ h2 {
   text-align: center;
   padding: 0 6px 3px;
   outline: none;
-}
-
-.inline-cloze.long-cloze input {
-  width: clamp(130px, calc(var(--answer-ch, 14) * 1ch), 360px);
 }
 
 .inline-cloze input:focus,

@@ -171,8 +171,15 @@
   <section class="panel add-word-panel">
     <div class="section-heading compact-heading">
       <h2>Add Words</h2>
-      <p>Add one or a few words without preparing a file.</p>
+      <p>Add one or a few words without preparing a file. If ECDICT is available, a word-only row can be expanded by part of speech.</p>
     </div>
+    {% if add_word_messages %}
+      <div class="messages local-messages">
+        {% for category, message in add_word_messages %}
+          <p class="message {{ category }}">{{ message }}</p>
+        {% endfor %}
+      </div>
+    {% endif %}
     <form class="add-word-form" action="{{ url_for('add_word') }}" method="post" data-add-word-form>
       <div class="add-word-rows" data-add-word-rows>
         <div class="add-word-row">

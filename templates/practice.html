@@ -65,7 +65,7 @@
         {% set cloze_parts = cloze_text.split('____', 1) %}
         {% set answer_limit = (cloze_answer or word.word)|length + 5 %}
         <form class="answer-form inline-answer-form" action="{{ url_for('submit_answer') }}" method="post" autocomplete="off">
-          <h1 class="cloze-prompt inline-cloze{% if cloze_word_count > 20 %} long-cloze{% endif %}">
+          <h1 class="cloze-prompt inline-cloze">
             <span>{{ cloze_parts[0] }}</span><input name="answer" type="text" aria-label="Missing word" maxlength="{{ answer_limit }}" style="--answer-ch: {{ answer_limit }};" autofocus required><span>{{ cloze_parts[1] if cloze_parts|length > 1 else "" }}</span>
           </h1>
           <button type="submit">Submit</button>
