@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block title %}typeng - Learned{% endblock %}
+
+{% block content %}
+<section class="panel hero-panel">
+  <div>
+    <p class="eyebrow">Spaced review</p>
+    <h1>Learned Words</h1>
+    <p class="panel-note">Words completed in normal study or cleared from wrong-word review.</p>
+  </div>
+</section>
+
+{% set review_input_id = "learned_review_count" %}
+{% set review_target_input_id = "learned_review_target_count" %}
+{% include "_review_plan.html" %}
+
+<section class="table-section">
+  <div class="section-heading">
+    <h2>Review Progress</h2>
+    <p>Progress here is spaced review progress, not the wrong-word three-answer rule.</p>
+  </div>
+  {% set word_list_mode = "learned" %}
+  {% include "_word_list.html" %}
+</section>
+{% endblock %}

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}typeng - Import Format{% endblock %}
+
+{% block content %}
+<section class="panel docs-panel">
+  <div class="section-heading">
+    <p class="eyebrow">Import Words</p>
+    <h1>Import Format</h1>
+    <p>The same guide is in <code>README.md</code> under <code>Import Format</code>.</p>
+  </div>
+
+  <div class="docs-grid">
+    <article>
+      <h2>TXT</h2>
+      <p>Use three required fields: word, part of speech, Chinese meaning. An example sentence can be added as an optional fourth field.</p>
+      <pre><code>abandon	verb	放弃；遗弃
+ability	noun	能力
+close	adjective	近的；亲密的
+close	verb	关闭
+abandon	verb	放弃；遗弃	The company decided to abandon the old plan.</code></pre>
+    </article>
+
+    <article>
+      <h2>CSV</h2>
+      <p>CSV can include a header, or use the same columns without a header.</p>
+      <pre><code>word,part_of_speech,meaning,example_sentence
+abandon,verb,放弃；遗弃,The company decided to abandon the old plan.
+ability,noun,能力,She has the ability to solve complex problems.</code></pre>
+    </article>
+  </div>
+</section>
+{% endblock %}

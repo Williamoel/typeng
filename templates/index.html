@@ -1,0 +1,365 @@
+{% extends "base.html" %}
+
+{% block title %}typeng - Library{% endblock %}
+
+{% block content %}
+{% if not edit_mode %}
+  <section class="panel common-libraries-panel">
+    <div class="section-heading compact-heading">
+      <h2>Common Libraries Available</h2>
+    </div>
+    <div class="preset-actions">
+      {% for key, preset in ecdict_presets.items() %}
+        <form action="{{ url_for('create_ecdict_preset') }}" method="post">
+          <input type="hidden" name="preset_key" value="{{ key }}">
+          <button type="submit" class="tiny secondary">{{ preset.name }}</button>
+        </form>
+      {% endfor %}
+    </div>
+  </section>
+{% endif %}
+
+<section class="panel hero-panel">
+  <div class="library-title-block">
+    <p class="eyebrow">Local vocabulary typing</p>
+    <h1>{{ active_library.name }}</h1>
+    <p class="panel-note">Build a session from the selected library.</p>
+  </div>
+  <div class="library-switcher">
+    <form class="library-select-form" action="{{ url_for('select_library') }}" method="post">
+      <label for="library_id">Library</label>
+      <select id="library_id" name="library_id" onchange="this.form.submit()">
+        {% for library in libraries %}
+          <option value="{{ library.id }}" {% if library.id == active_library.id %}selected{% endif %}>
+            {{ library.name }} ({{ library.word_count }})
+          </option>
+        {% endfor %}
+      </select>
+      {% if edit_mode %}
+        <button
+          type="submit"
+          class="tiny danger"
+          form="clear-library-form"
+          onclick="return confirm('Clear every word and learning record? This cannot be undone.');"
+        >Clear library</button>
+      {% endif %}
+    </form>
+    {% if edit_mode %}
+      <form id="clear-library-form" action="{{ url_for('clear_words') }}" method="post"></form>
+    {% endif %}
+    <form class="library-add-form" action="{{ url_for('add_library') }}" method="post">
+      <input name="library_name" type="text" placeholder="New library name" aria-label="New library name" required>
+      <button type="submit">Create</button>
+    </form>
+  </div>
+</section>
+
+{% if not edit_mode %}
+  <section class="stats" aria-label="Vocabulary statistics">
+    <div><span>{{ total_count }}</span>Total</div>
+    <div><span>{{ new_count }}</span>New</div>
+    <div><span>{{ learned_count }}</span>Learned</div>
+    <div><span>{{ wrong_count }}</span>Wrong</div>
+  </section>
+{% endif %}
+
+{% if not edit_mode %}
+  <form class="panel control-panel study-panel study-panel-wide" action="{{ url_for('create_preview') }}" method="post">
+    <div class="section-heading compact-heading">
+      <h2>Study Session</h2>
+    </div>
+    <div class="study-session-boxes">
+      <div class="study-session-box study-count-box">
+        <div class="study-controls">
+          <label for="study_count">Next</label>
+          <input id="study_count" name="study_count" type="number" min="1" max="200" value="10">
+          <span>new words</span>
+          <button type="submit">Preview</button>
+        </div>
+      </div>
+      <div class="study-session-box study-options-box">
+        {% set include_cloze = true %}
+        {% set show_chinese_default = true %}
+        {% set show_definition_default = false %}
+        {% set auto_audio_default = true %}
+        {% set show_phonetic_default = true %}
+        {% include "_practice_options.html" %}
+      </div>
+    </div>
+  </form>
+{% endif %}
+
+{% if edit_mode %}
+  <section class="edit-tools-grid">
+    <section class="panel import-panel compact-import-panel">
+      <div class="import-copy">
+        <div class="compact-panel-title-row">
+          <h2>Import Words</h2>
+        </div>
+        <p>Add a TXT or CSV file into {{ active_library.name }}.</p>
+        <p class="import-guide-line">
+          Before importing, please refer to
+          <a class="secondary-button tiny-link" href="{{ url_for('import_format') }}">Format guide</a>
+        </p>
+      </div>
+      <form class="import-form" action="{{ url_for('import_words') }}" method="post" enctype="multipart/form-data">
+        <div class="file-row">
+          <input id="word_file" name="word_file" type="file" accept=".txt,.csv" required>
+          <button type="submit">Import</button>
+        </div>
+      </form>
+    </section>
+
+    {% if comparable_libraries %}
+      <section class="panel library-exclude-panel compact-exclude-panel">
+        <div class="compact-panel-title-row">
+          <h2>Exclude Overlap</h2>
+          <button type="submit" class="danger tiny" form="exclude-overlap-form">Remove overlap</button>
+        </div>
+        <p class="compact-panel-note">Remove words from {{ active_library.name }} that already exist in another local library.</p>
+        <form id="exclude-overlap-form" class="exclude-form compact-exclude-form" action="{{ url_for('exclude_library_words') }}" method="post" data-exclude-form>
+          <label class="exclude-row">
+            <span>Compare with</span>
+            <select name="source_library_id" required>
+              {% for library in comparable_libraries %}
+                <option value="{{ library.id }}">{{ library.name }} ({{ library.word_count }})</option>
+              {% endfor %}
+            </select>
+          </label>
+          <div class="exclude-row">
+            <span>Match by</span>
+            <fieldset class="match-scope">
+              <label class="check-label">
+                <input type="radio" name="match_scope" value="word_part" checked>
+                Word + part
+              </label>
+              <label class="check-label">
+                <input type="radio" name="match_scope" value="word">
+                Word only
+              </label>
+            </fieldset>
+          </div>
+        </form>
+      </section>
+    {% endif %}
+  </section>
+
+  <section class="panel auto-examples-panel">
+    <div class="section-heading compact-heading">
+      <h2>Auto Examples</h2>
+      <p>Fill or refresh examples from Wiktionary first, then WordNet. The selected word range is always refreshed.</p>
+    </div>
+    <form class="auto-examples-form" action="{{ url_for('fill_auto_examples') }}" method="post">
+      <label for="example_start">Words from</label>
+      <input id="example_start" name="example_start" type="number" min="1" value="1">
+      <label for="example_end">to</label>
+      <input id="example_end" name="example_end" type="number" min="1" value="100">
+      <button type="submit">Fill examples</button>
+    </form>
+    <div class="maintenance-row">
+      <span>Remove word + part entries unsupported by Wiktionary and WordNet.</span>
+      <form class="cleanup-form" action="{{ url_for('preview_unsupported_entries') }}" method="post">
+        <label for="cleanup_start">Words from</label>
+        <input id="cleanup_start" name="cleanup_start" type="number" min="1" value="{{ request.args.get('cleanup_start', 1) }}">
+        <label for="cleanup_end">to</label>
+        <input id="cleanup_end" name="cleanup_end" type="number" min="1" value="{{ request.args.get('cleanup_end', 100) }}">
+        <button type="submit" class="secondary tiny">Preview cleanup</button>
+      </form>
+    </div>
+  </section>
+
+  <section class="panel add-word-panel">
+    <div class="section-heading compact-heading">
+      <h2>Add Words</h2>
+      <p>Add one or a few words without preparing a file.</p>
+    </div>
+    <form class="add-word-form" action="{{ url_for('add_word') }}" method="post" data-add-word-form>
+      <div class="add-word-rows" data-add-word-rows>
+        <div class="add-word-row">
+          <input name="word[]" type="text" placeholder="word" aria-label="Word">
+          <select name="part_of_speech[]" aria-label="Part of speech">
+            <option value="" selected disabled hidden>Select part</option>
+            {% for value, label in part_of_speech_options %}
+              <option value="{{ value }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+          <input name="meaning[]" type="text" placeholder="Chinese meaning" aria-label="Chinese meaning">
+          <input name="example_sentence[]" type="text" placeholder="Example sentence" aria-label="Example sentence">
+          <button type="button" class="tiny secondary" data-remove-word-row aria-label="Remove row">Remove</button>
+        </div>
+      </div>
+      <div class="add-word-actions">
+        <button type="button" class="secondary" data-add-word-row aria-label="Add another row">+ Add row</button>
+        <button type="submit">Save words</button>
+      </div>
+    </form>
+  </section>
+{% endif %}
+
+<section class="table-section">
+  {% if edit_mode %}
+    <div class="edit-library-head">
+      <form class="edit-library-search-grid" action="{{ url_for('index') }}" method="get">
+        <input type="hidden" name="edit" value="1">
+        <div class="edit-search-primary">
+          <input name="q" type="search" value="{{ pagination.search }}" placeholder="Search words or meanings" aria-label="Search words or meanings">
+          <button type="submit" class="secondary">Search</button>
+          {% if pagination.search %}
+            <a class="secondary-button tiny-link" href="{{ url_for('index', edit=1, sort=pagination.sort) }}">Clear</a>
+          {% endif %}
+        </div>
+        <label class="sort-control edit-sort-control">
+          Sort
+          <select name="sort" onchange="this.form.submit()">
+            {% for value, label in sort_modes.items() %}
+              <option value="{{ value }}" {% if pagination.sort == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </form>
+      <button type="submit" class="secondary save-done-button" form="edit-page-form">Save and done</button>
+      <div class="library-title-group">
+        <h2>Word Library</h2>
+        <p>Same word with different parts of speech is kept as separate knowledge.</p>
+      </div>
+    </div>
+  {% else %}
+    <div class="library-view-head">
+      <form class="library-view-search-grid" action="{{ url_for('index') }}" method="get">
+        <div class="view-search-primary">
+          <input name="q" type="search" value="{{ pagination.search }}" placeholder="Search words or meanings" aria-label="Search words or meanings">
+          <button type="submit" class="secondary">Search</button>
+          {% if pagination.search %}
+            <a class="secondary-button tiny-link" href="{{ url_for('index', sort=pagination.sort) }}">Clear</a>
+          {% endif %}
+        </div>
+        <label class="sort-control view-sort-control">
+          Sort
+          <select name="sort" onchange="this.form.submit()">
+            {% for value, label in sort_modes.items() %}
+              <option value="{{ value }}" {% if pagination.sort == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </form>
+      <a class="secondary-button view-edit-button" href="{{ url_for('index', edit=1) }}">Edit library</a>
+      <div class="library-title-group">
+        <h2>Word Library</h2>
+        <p>Same word with different parts of speech is kept as separate knowledge.</p>
+      </div>
+    </div>
+  {% endif %}
+
+  {% if words %}
+    <div class="pagination-bar">
+      <span>Showing {{ pagination.start }}-{{ pagination.end }} of {{ pagination.total }}</span>
+      <nav aria-label="Word library pages">
+        {% if pagination.has_prev %}
+          <a class="secondary-button tiny-link" href="{{ url_for('index', edit=1 if edit_mode else None, q=pagination.search or None, sort=pagination.sort, page=pagination.prev_page) }}">Previous</a>
+        {% else %}
+          <span class="page-disabled">Previous</span>
+        {% endif %}
+        <form class="page-jump" action="{{ url_for('index') }}" method="get">
+          {% if edit_mode %}
+            <input type="hidden" name="edit" value="1">
+          {% endif %}
+          {% if pagination.search %}
+            <input type="hidden" name="q" value="{{ pagination.search }}">
+          {% endif %}
+          <input type="hidden" name="sort" value="{{ pagination.sort }}">
+          <label>
+            Page
+            <input name="page" type="number" min="1" max="{{ pagination.total_pages }}" value="{{ pagination.page }}" aria-label="Page number">
+            / {{ pagination.total_pages }}
+          </label>
+          <button type="submit" class="secondary tiny-link">Go</button>
+        </form>
+        {% if pagination.has_next %}
+          <a class="secondary-button tiny-link" href="{{ url_for('index', edit=1 if edit_mode else None, q=pagination.search or None, sort=pagination.sort, page=pagination.next_page) }}">Next</a>
+        {% else %}
+          <span class="page-disabled">Next</span>
+        {% endif %}
+      </nav>
+    </div>
+
+    {% if edit_mode %}
+      <form id="edit-page-form" action="{{ url_for('save_page_edits') }}" method="post">
+        <input type="hidden" name="q" value="{{ pagination.search }}">
+        <input type="hidden" name="sort" value="{{ pagination.sort }}">
+        <input type="hidden" name="page" value="{{ pagination.page }}">
+      </form>
+      <form id="bulk-delete-form" class="bulk-delete-form" action="{{ url_for('bulk_delete_words') }}" method="post" data-bulk-delete-form>
+        <input type="hidden" name="q" value="{{ pagination.search }}">
+        <input type="hidden" name="sort" value="{{ pagination.sort }}">
+        <input type="hidden" name="page" value="{{ pagination.page }}">
+        <div class="bulk-toolbar">
+          <label class="check-label">
+            <input type="checkbox" data-select-all-words>
+            Select this page
+          </label>
+          <span data-selected-count>0 selected</span>
+          <button type="submit" class="danger tiny" disabled data-bulk-delete-button>Delete selected</button>
+        </div>
+      </form>
+    {% endif %}
+
+    <div class="word-table {% if edit_mode %}editing-table{% endif %}">
+      <div class="table-row table-head {% if edit_mode %}library-row edit-library-row{% else %}library-view-row{% endif %}">
+        {% if edit_mode %}
+          <span>Select</span>
+        {% endif %}
+        <span>Word</span>
+        <span>Part</span>
+        <span>Meaning</span>
+        {% if edit_mode %}
+          <span>Example</span>
+        {% endif %}
+        <span>Status</span>
+      </div>
+      {% for word in words %}
+        {% if edit_mode %}
+          <div class="table-row library-row edit-library-row">
+            <label class="row-select" aria-label="Select {{ word.word }}">
+              <input form="bulk-delete-form" type="checkbox" name="word_ids" value="{{ word.id }}" data-word-select>
+            </label>
+            <input form="edit-page-form" type="hidden" name="word_ids" value="{{ word.id }}">
+            <div class="edit-row-fields">
+              <input form="edit-page-form" name="word_{{ word.id }}" type="text" value="{{ word.word }}" aria-label="Word">
+              <select form="edit-page-form" name="part_of_speech_{{ word.id }}" aria-label="Part of speech">
+                {% set known_part = namespace(found=false) %}
+                {% for value, label in part_of_speech_options %}
+                  {% if value == word.part_of_speech %}
+                    {% set known_part.found = true %}
+                  {% endif %}
+                  <option value="{{ value }}" {% if value == word.part_of_speech %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+                {% if not known_part.found %}
+                  <option value="{{ word.part_of_speech }}" selected>{{ word.part_of_speech }}</option>
+                {% endif %}
+              </select>
+              <input form="edit-page-form" name="meaning_{{ word.id }}" type="text" value="{{ word.meaning }}" aria-label="Meaning">
+              <input form="edit-page-form" name="example_sentence_{{ word.id }}" type="text" value="{{ word.example_sentence or '' }}" aria-label="Example sentence" placeholder="Example sentence">
+            </div>
+            <span><mark class="status {{ word.status }}">{{ word.status }}</mark></span>
+          </div>
+        {% else %}
+          <div class="table-row library-view-row">
+            <span class="word-text">{{ word.word }}</span>
+            <span>{{ word.part_of_speech }}</span>
+            <span>{{ word.meaning }}</span>
+            <span><mark class="status {{ word.status }}">{{ word.status }}</mark></span>
+          </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="empty-state">
+      {% if pagination.search %}
+        <p>No words match “{{ pagination.search }}”.</p>
+      {% else %}
+        <p>No words yet. Import a list or try <code>samples/basic_words.txt</code>.</p>
+      {% endif %}
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

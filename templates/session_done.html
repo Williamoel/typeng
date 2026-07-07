@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block title %}typeng - Done{% endblock %}
+
+{% block content %}
+<section class="panel done-panel">
+  <p class="eyebrow">Session complete</p>
+  {% if mode == "wrong" %}
+    <h1>Wrong-word review finished.</h1>
+    <p>Words that reached {{ wrong_review_target_count }} cumulative correct answers have moved back to learned.</p>
+  {% elif mode == "review" %}
+    <h1>Review session finished.</h1>
+    <p>Correctly reviewed words have been scheduled for their next interval. Words that reached the target will stop appearing in scheduled review.</p>
+  {% elif missed_words %}
+    <h1>Every word was typed correctly once.</h1>
+    <p>These words were missed earlier in the session. Keep the checked ones in wrong words for later review.</p>
+    <form class="missed-form" action="{{ url_for('finalize_practice') }}" method="post">
+      <div class="missed-list">
+        {% for word in missed_words %}
+          <label class="missed-item">
+            <input type="checkbox" name="wrong_ids" value="{{ word.id }}" checked>
+            <span class="word-text">{{ word.word }}</span>
+            <span>{{ word.part_of_speech }}</span>
+            <span>{{ word.meaning }}</span>
+          </label>
+        {% endfor %}
+      </div>
+      <button type="submit">Save choices</button>
+    </form>
+  {% else %}
+    <h1>This study session is done.</h1>
+    <p>All words were typed correctly without misses.</p>
+  {% endif %}
+  {% if not missed_words %}
+    <nav class="done-actions" aria-label="Session destination">
+      <a class="button-link" href="{{ url_for('index') }}">Back to library</a>
+      <a class="secondary-button" href="{{ url_for('learned') }}">Go to learned</a>
+      <a class="secondary-button" href="{{ url_for('wrong') }}">Go to wrong</a>
+    </nav>
+  {% endif %}
+</section>
+{% endblock %}

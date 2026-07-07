@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+
+{% block title %}typeng - Practice{% endblock %}
+
+{% block content %}
+<section class="practice-wrap" data-practice-center>
+  <div class="practice-meta">
+    <span>{{ index + 1 }} / {{ total }}</span>
+    {% if mode == "wrong" %}
+      <span>Wrong-word daily review</span>
+      <span>{{ word.wrong_correct_count }} / {{ wrong_review_target_count }} correct</span>
+      <span>Round {{ practice_round }}</span>
+    {% elif mode == "review" %}
+      <span>Spaced review</span>
+      <span>{{ word.review_correct_count }} / {{ review_target_count }} reviews</span>
+      <span>Round {{ practice_round }}</span>
+    {% else %}
+      {% if prompt_mode == "audio" %}
+        <span>Audio-only mode</span>
+      {% elif prompt_mode == "chinese" %}
+        <span>Chinese mode</span>
+      {% elif prompt_mode == "cloze" %}
+        <span>{% if cloze_followup_active %}Cloze follow-up{% elif cloze_scope == "only" %}Only in cloze{% else %}Cloze mode{% endif %}</span>
+      {% else %}
+        <span>Chinese + audio mode</span>
+      {% endif %}
+      <span>Round {{ practice_round }}</span>
+      {% if missed_count %}
+        <span>{{ missed_count }} missed in this session</span>
+      {% endif %}
+    {% endif %}
+  </div>
+
+  <article class="practice-card"{% if not awaiting_next and prompt_mode not in ["chinese", "cloze"] %} data-auto-play-word="{{ word.word }}"{% endif %}>
+    <div class="practice-audio{% if prompt_mode == 'chinese' %} muted-audio{% endif %}">
+      <button type="button" class="icon-button" data-play-word="{{ word.word }}" aria-label="Play pronunciation" title="Play pronunciation">Listen</button>
+      <label>
+        Accent
+        <select data-pronunciation-accent>
+          <option value="us">US</option>
+          <option value="uk">UK</option>
+        </select>
+      </label>
+      <label class="check-label">
+        <input type="checkbox" data-pronunciation-autoplay>
+        Auto-play
+      </label>
+    </div>
+    <p class="part">
+      {{ word.part_of_speech }}
+      {% if show_phonetic and word.phonetic %}
+        <span class="phonetic">/{{ word.phonetic }}/</span>
+      {% endif %}
+    </p>
+
+    {% if prompt_mode != "audio" %}
+      <p class="cloze-meaning">{{ word.meaning }}</p>
+    {% endif %}
+    {% if show_definition and word.definition %}
+      <p class="definition-prompt">{{ word.definition|definition_lines(word.part_of_speech) }}</p>
+    {% endif %}
+
+    {% if not awaiting_next %}
+      {% if prompt_mode == "cloze" and cloze_text %}
+        {% set cloze_parts = cloze_text.split('____', 1) %}
+        {% set answer_limit = (cloze_answer or word.word)|length + 5 %}
+        <form class="answer-form inline-answer-form" action="{{ url_for('submit_answer') }}" method="post" autocomplete="off">
+          <h1 class="cloze-prompt inline-cloze{% if cloze_word_count > 20 %} long-cloze{% endif %}">
+            <span>{{ cloze_parts[0] }}</span><input name="answer" type="text" aria-label="Missing word" maxlength="{{ answer_limit }}" style="--answer-ch: {{ answer_limit }};" autofocus required><span>{{ cloze_parts[1] if cloze_parts|length > 1 else "" }}</span>
+          </h1>
+          <button type="submit">Submit</button>
+        </form>
+      {% else %}
+        {% set answer_limit = word.word|length + 5 %}
+        <form class="answer-form underline-answer-form" action="{{ url_for('submit_answer') }}" method="post" autocomplete="off">
+          {% if prompt_mode == "audio" %}
+            <h1 class="audio-prompt">Listen and type the word.</h1>
+          {% endif %}
+          <input name="answer" type="text" aria-label="Answer" maxlength="{{ answer_limit }}" style="--answer-ch: {{ answer_limit }};" autofocus required>
+          <button type="submit">Submit</button>
+        </form>
+      {% endif %}
+    {% else %}
+      {% if result.correct %}
+        <div class="feedback correct">
+          {% if result.form_hint %}
+            <p>Correct. In this sentence, use:</p>
+            <strong>{{ result.cloze_answer }}</strong>
+            {% if result.example_match %}
+              <p class="feedback-example form-hint-example">
+                {{ result.example_before }}<mark>{{ result.example_match }}</mark>{{ result.example_after }}
+              </p>
+            {% elif result.example_sentence %}
+              <p class="feedback-example">{{ result.example_sentence }}</p>
+            {% endif %}
+          {% else %}
+            <p>Correct</p>
+            <strong>{{ result.word }}</strong>
+          {% endif %}
+        </div>
+        <form action="{{ url_for('next_word') }}" method="post">
+          <button type="submit" name="action" value="next" autofocus>Next</button>
+        </form>
+      {% else %}
+        <div class="feedback wrong">
+          <p>Your answer: <span>{{ result.answer or "(empty)" }}</span></p>
+          <p>Correct answer:</p>
+          <strong>{{ result.word }}</strong>
+          {% if prompt_mode == "cloze" and result.cloze_answer and result.cloze_answer|lower != result.word|lower %}
+            <p>Sentence form: <span>{{ result.cloze_answer }}</span></p>
+          {% endif %}
+          {% if result.example_sentence %}
+            <p class="feedback-example">{{ result.example_sentence }}</p>
+          {% endif %}
+        </div>
+        <form class="choice-row" action="{{ url_for('next_word') }}" method="post">
+          {% if mode == "wrong" %}
+            <button type="submit" name="action" value="next" autofocus>Continue</button>
+          {% else %}
+            <button type="submit" name="action" value="next" autofocus>Continue</button>
+          {% endif %}
+        </form>
+      {% endif %}
+    {% endif %}
+  </article>
+</section>
+{% endblock %}

@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local app data
+data/
+*.db
+/typeng.db
+
+# Outdated local planning notes
+/PROJECT.md
+
+# Local crash/runtime files
+.sentry-native/
+*.log
+
+# Large dictionary/resource files
+/kaikki.org-dictionary-English.jsonl
+/resources/ecdict.csv
+/resources/wiktionary/*.jsonl
+/resources/wordnet/*.zip
+/resources/tatoeba/
+
+# Build outputs
+build/
+dist/
+*.spec
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.env

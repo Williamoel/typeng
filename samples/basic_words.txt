@@ -1,0 +1,10 @@
+abandon	verb	放弃；遗弃
+ability	noun	能力
+academic	adjective	学术的
+benefit	noun	好处；益处
+benefit	verb	受益
+challenge	noun	挑战
+challenge	verb	质疑；挑战
+develop	verb	发展；培养
+evidence	noun	证据
+focus	verb	集中注意力

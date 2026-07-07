@@ -1,0 +1,63 @@
+{% if words %}
+  {% set list_mode = word_list_mode|default("general") %}
+  <div class="word-table">
+    <div class="table-row table-head with-actions">
+      <span>Word</span>
+      <span>Part</span>
+      <span>Meaning</span>
+      {% if list_mode == "wrong" %}
+        <span>Wrong-word Review</span>
+      {% elif list_mode == "learned" %}
+        <span>Spaced Review</span>
+      {% else %}
+        <span>Review</span>
+      {% endif %}
+      <span>Actions</span>
+    </div>
+    {% for word in words %}
+      <div class="table-row with-actions">
+        <span class="word-text">{{ word.word }}</span>
+        <span>{{ word.part_of_speech }}</span>
+        <span>{{ word.meaning }}</span>
+        {% if list_mode == "learned" %}
+          <span class="review-cell">
+            <strong>{{ word.review_correct_count }} / {{ review_target_count }}</strong>
+            {% if word.review_correct_count >= review_target_count and not word.next_review_at %}
+              <small class="review-state complete">Complete</small>
+            {% elif word.next_review_at and word.next_review_at[:10] <= current_review_date %}
+              <small class="review-state due">Due now</small>
+            {% elif word.next_review_at %}
+              <small class="review-state scheduled">Scheduled</small>
+            {% else %}
+              <small class="review-state idle">Not scheduled</small>
+            {% endif %}
+          </span>
+        {% elif list_mode == "wrong" %}
+          <span class="review-cell">
+            <strong>{{ word.wrong_correct_count }} / {{ wrong_review_target_count }}</strong>
+            <small class="review-state scheduled">Wrong-word daily</small>
+          </span>
+        {% else %}
+          <span>{{ word.wrong_correct_count }} / {{ wrong_review_target_count }}</span>
+        {% endif %}
+        <span class="actions">
+          {% if list_mode != "learned" %}
+            <form action="{{ url_for('delete_word', word_id=word.id) }}" method="post" onsubmit="return confirm('Delete this word?');">
+              <button type="submit" class="tiny danger">Delete</button>
+            </form>
+          {% endif %}
+          <form action="{{ url_for('reset_word', word_id=word.id) }}" method="post">
+            <button type="submit" class="tiny">Reset</button>
+          </form>
+          <form action="{{ url_for('mark_wrong', word_id=word.id) }}" method="post">
+            <button type="submit" class="tiny secondary">Wrong</button>
+          </form>
+        </span>
+      </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="empty-state">
+    <p>No words here yet.</p>
+  </div>
+{% endif %}

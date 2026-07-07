@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}typeng - Preview{% endblock %}
+
+{% block content %}
+<section class="panel hero-panel">
+  <div>
+    <p class="eyebrow">Preview</p>
+    <h1>Read these words once before typing.</h1>
+    {% if cloze_scope == "with" %}
+      <p class="panel-note">Practice mode: standard typing, then a cloze round for words with examples.</p>
+    {% elif prompt_mode == "audio" %}
+      <p class="panel-note">Practice mode: audio only. The test will hide Chinese meanings.</p>
+    {% elif prompt_mode == "chinese" %}
+      <p class="panel-note">Practice mode: Chinese prompt. Pronunciation is available manually.</p>
+    {% elif prompt_mode == "cloze" and cloze_scope == "only" %}
+      <p class="panel-note">Practice mode: only in cloze.</p>
+    {% else %}
+      <p class="panel-note">Practice mode: Chinese + audio.</p>
+    {% endif %}
+  </div>
+  <form action="{{ url_for('start_practice') }}" method="post">
+    <button type="submit">Start Practice</button>
+  </form>
+</section>
+
+<section class="preview-list">
+  {% for word in words %}
+    <article class="word-card">
+      <div>
+        <h2>
+          {{ word.word }}
+          <button type="button" class="audio-inline" data-play-word="{{ word.word }}" aria-label="Play {{ word.word }}" title="Play pronunciation">Listen</button>
+        </h2>
+        <p>
+          {{ word.part_of_speech }}
+          {% if show_phonetic and word.phonetic %}<span class="phonetic">/{{ word.phonetic }}/</span>{% endif %}
+        </p>
+        {% if word.definition %}
+          <p class="small-definition">{{ word.definition|definition_lines(word.part_of_speech) }}</p>
+        {% endif %}
+        {% if prompt_mode == "cloze" and word.example_sentence %}
+          <p class="small-example">{{ word.example_sentence }}</p>
+        {% endif %}
+      </div>
+      <strong>{{ word.meaning }}</strong>
+    </article>
+  {% endfor %}
+</section>
+{% endblock %}

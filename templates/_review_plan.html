@@ -1,0 +1,58 @@
+<section class="panel review-panel">
+  <div class="section-heading compact-heading">
+    <h2>Review Plan</h2>
+    {% if due_review_count %}
+      <p>{{ due_review_count }} words due now. {{ scheduled_review_count }} learned words are on this library's review schedule.</p>
+    {% elif scheduled_review_count %}
+      <p>No words are due now. {{ scheduled_review_count }} learned words are scheduled for later review.</p>
+    {% else %}
+      <p>No spaced reviews are scheduled yet.</p>
+    {% endif %}
+  </div>
+  <div class="review-grid">
+    <form class="review-start-form review-options-form" action="{{ url_for('start_due_review') }}" method="post">
+      <input type="hidden" name="next" value="{{ request.path }}">
+      <div class="review-main-box">
+        <div class="review-start-row">
+          <label for="{{ review_input_id|default('review_count') }}">Review now</label>
+          <input
+            id="{{ review_input_id|default('review_count') }}"
+            name="review_count"
+            type="number"
+            min="1"
+            max="{{ due_review_count if due_review_count else 1 }}"
+            value="{{ 0 if not due_review_count else (due_review_count if due_review_count < 30 else 30) }}"
+            {% if not due_review_count %}disabled{% endif %}
+          >
+          <span>of {{ due_review_count }} due</span>
+          <button type="submit" {% if not due_review_count %}disabled{% endif %}>Start Review</button>
+        </div>
+        <div class="review-settings-inline">
+          <label for="{{ review_target_input_id|default('review_target_count') }}">Stop after</label>
+          <input
+            form="learned-review-settings-form"
+            id="{{ review_target_input_id|default('review_target_count') }}"
+            name="review_target_count"
+            type="number"
+            min="{{ min_review_target_count }}"
+            max="{{ max_review_target_count }}"
+            value="{{ review_target_count }}"
+          >
+          <span>successful reviews</span>
+          <button type="submit" class="secondary" form="learned-review-settings-form">Save</button>
+        </div>
+      </div>
+      <div class="review-options-box">
+        {% set include_cloze = true %}
+        {% set show_chinese_default = true %}
+        {% set show_definition_default = false %}
+        {% set show_phonetic_default = true %}
+        {% set auto_audio_default = true %}
+        {% include "_practice_options.html" %}
+      </div>
+    </form>
+    <form id="learned-review-settings-form" class="review-settings-form hidden-settings-form" action="{{ url_for('update_review_settings') }}" method="post">
+      <input type="hidden" name="next" value="{{ request.path }}">
+    </form>
+  </div>
+</section>

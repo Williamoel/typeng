@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block title %}typeng - Cleanup Preview{% endblock %}
+
+{% block content %}
+<section class="panel hero-panel">
+  <div>
+    <p class="eyebrow">Cleanup Preview</p>
+    <h1>Entries without dictionary example support</h1>
+    <p class="panel-note">These word + part entries have no usable Wiktionary or WordNet example. Review before deleting.</p>
+  </div>
+  <div class="cleanup-actions">
+    <a class="secondary-button" href="{{ url_for('index', edit=1) }}">Back to edit</a>
+  </div>
+</section>
+
+<section class="table-section">
+  <div class="section-heading library-heading">
+    <div>
+      <h2>{{ unsupported_words|length }} Unsupported Entries</h2>
+      <p>Checked words {{ cleanup_range.start }}-{{ cleanup_range.end }} of {{ cleanup_range.total }}. Only entries unsupported by both Wiktionary and WordNet are listed.</p>
+    </div>
+    <div class="cleanup-page-actions">
+      <form action="{{ url_for('preview_unsupported_entries') }}" method="post">
+        <input type="hidden" name="cleanup_start" value="{{ cleanup_range.prev_start }}">
+        <input type="hidden" name="cleanup_end" value="{{ cleanup_range.prev_end }}">
+        <button type="submit" class="secondary tiny" {% if not cleanup_range.has_prev %}disabled{% endif %}>Previous</button>
+      </form>
+      <form class="page-jump" action="{{ url_for('preview_unsupported_entries') }}" method="post">
+        <label>
+          Words from
+          <input name="cleanup_start" type="number" min="1" max="{{ cleanup_range.total if cleanup_range.total else 1 }}" value="{{ cleanup_range.start }}">
+        </label>
+        <label>
+          to
+          <input name="cleanup_end" type="number" min="1" max="{{ cleanup_range.total if cleanup_range.total else 1 }}" value="{{ cleanup_range.end }}">
+        </label>
+        <button type="submit" class="secondary tiny">Go</button>
+      </form>
+      <form action="{{ url_for('preview_unsupported_entries') }}" method="post">
+        <input type="hidden" name="cleanup_start" value="{{ cleanup_range.next_start }}">
+        <input type="hidden" name="cleanup_end" value="{{ cleanup_range.next_end }}">
+        <button type="submit" class="secondary tiny" {% if not cleanup_range.has_next %}disabled{% endif %}>Next</button>
+      </form>
+    </div>
+  </div>
+
+  {% if unsupported_words %}
+    <form class="bulk-delete-form" action="{{ url_for('confirm_unsupported_cleanup') }}" method="post" data-bulk-delete-form>
+      <div class="bulk-toolbar">
+        <label class="check-label">
+          <input type="checkbox" data-select-all-words checked>
+          Select all
+        </label>
+        <span data-selected-count>{{ unsupported_words|length }} selected</span>
+        <button
+          type="submit"
+          class="danger tiny"
+          data-bulk-delete-button
+        >Delete selected</button>
+      </div>
+      <div class="word-table cleanup-table">
+        <div class="table-row table-head cleanup-row">
+          <span>Select</span>
+          <span>Word</span>
+          <span>Part</span>
+          <span>Meaning</span>
+          <span>Status</span>
+        </div>
+        {% for word in unsupported_words %}
+          <div class="table-row cleanup-row">
+            <label class="row-select" aria-label="Select {{ word.word }}">
+              <input type="checkbox" name="word_ids" value="{{ word.id }}" data-word-select checked>
+            </label>
+            <span class="word-text">{{ word.word }}</span>
+            <span>{{ word.part_of_speech }}</span>
+            <span>{{ word.meaning }}</span>
+            <span><mark class="status {{ word.status }}">{{ word.status }}</mark></span>
+          </div>
+        {% endfor %}
+      </div>
+    </form>
+  {% else %}
+    <div class="empty-state">
+      <p>No unsupported entries were found in this library.</p>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

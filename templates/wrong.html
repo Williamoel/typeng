@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}typeng - Wrong Words{% endblock %}
+
+{% block content %}
+<section class="panel hero-panel wrong-title-panel">
+  <div>
+    <p class="eyebrow">Wrong-word review</p>
+    <h1>Wrong Words</h1>
+    <p class="panel-note">{{ wrong_review_target_count }} cumulative correct answers move a word back to learned.</p>
+  </div>
+</section>
+
+<section class="panel wrong-review-panel">
+  <div class="section-heading compact-heading">
+    <h2>Wrong-word Review</h2>
+    {% if due_wrong_count %}
+      <p>{{ due_wrong_count }} due today. {{ scheduled_wrong_count }} wrong words are scheduled for daily review.</p>
+    {% elif scheduled_wrong_count %}
+      <p>No wrong words are due today. {{ scheduled_wrong_count }} words are scheduled from tomorrow onward.</p>
+    {% else %}
+      <p>No wrong words are scheduled for review.</p>
+    {% endif %}
+  </div>
+  <div class="review-grid">
+    <form class="wrong-review-form review-options-form" action="{{ url_for('start_wrong_review') }}" method="post">
+      <div class="review-main-box">
+        <div class="review-start-row">
+          <label for="wrong_review_count">Review now</label>
+          <input
+            id="wrong_review_count"
+            name="wrong_count"
+            type="number"
+            min="1"
+            max="{{ due_wrong_count if due_wrong_count else 1 }}"
+            value="{{ 0 if not due_wrong_count else (due_wrong_count if due_wrong_count < 30 else 30) }}"
+            {% if not due_wrong_count %}disabled{% endif %}
+          >
+          <span>of {{ due_wrong_count }} due</span>
+          <button type="submit" {% if not due_wrong_count %}disabled{% endif %}>Start Review</button>
+        </div>
+        <div class="review-settings-inline">
+          <label for="wrong_review_target_count">Move after</label>
+          <input
+            form="wrong-review-settings-form"
+            id="wrong_review_target_count"
+            name="wrong_review_target_count"
+            type="number"
+            min="{{ min_wrong_review_target_count }}"
+            max="{{ max_wrong_review_target_count }}"
+            value="{{ wrong_review_target_count }}"
+          >
+          <span>correct answers</span>
+          <button type="submit" class="secondary" form="wrong-review-settings-form">Save</button>
+        </div>
+      </div>
+      <div class="review-options-box">
+        {% set include_cloze = true %}
+        {% set show_chinese_default = true %}
+        {% set show_definition_default = false %}
+        {% set show_phonetic_default = true %}
+        {% set auto_audio_default = true %}
+        {% include "_practice_options.html" %}
+      </div>
+    </form>
+    <form id="wrong-review-settings-form" class="review-settings-form hidden-settings-form" action="{{ url_for('update_wrong_settings') }}" method="post">
+      <input type="hidden" name="next" value="{{ request.path }}">
+    </form>
+  </div>
+</section>
+
+<section class="table-section">
+  <div class="section-heading">
+    <h2>Wrong Words</h2>
+    <p>Review starts the next day. A missed answer resets the count and schedules another review for tomorrow.</p>
+  </div>
+  {% set word_list_mode = "wrong" %}
+  {% include "_word_list.html" %}
+</section>
+{% endblock %}
