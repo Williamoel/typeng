@@ -1,0 +1,83 @@
+PACKAGING.md
+  s_9fa5955d877f0d::t_e464ee1a283e11 117-118,121,124
+  s_9fa5955d877f0d::t_8eb4f3cd170832 5-9,12,15-18
+static/audio.js
+  s_9fa5955d877f0d::t_fcafbd5d2119f8 159,162-172
+run_typeng.py
+  s_9fa5955d877f0d::t_219fde6e5a09ce 79-85
+  s_9fa5955d877f0d::t_8a8a7e341e3143 76-78
+  s_9fa5955d877f0d::t_ae3765c2cdbd27 86-88
+  s_9fa5955d877f0d::t_7182140f11ee35 1-75,89-91
+tests/test_core_logic.py
+  s_9fa5955d877f0d::t_7e41e33fb365a7 122-124
+  s_9fa5955d877f0d::t_db9349e49268a6 1-121,125-227
+CONTRIBUTING.md
+  s_9fa5955d877f0d::t_7241af7f4f022c 7,12,18,22,24,33,35-42
+  s_9fa5955d877f0d::t_99fa942d436991 4-6
+  s_9fa5955d877f0d::t_c1d11d663feb16 8-11
+  s_9fa5955d877f0d::t_b6fa28eaa2afe3 13-17
+  s_9fa5955d877f0d::t_36b33cb712a51d 19-21
+  s_9fa5955d877f0d::t_73236000a56305 23
+  s_9fa5955d877f0d::t_4baa3c47d6df11 25-27,30-32
+  s_9fa5955d877f0d::t_b1f7646793d99a 34
+  s_9fa5955d877f0d::t_2e1332128cdd9c 43-45
+  s_9fa5955d877f0d::t_4e83d4f21bfdc6 1-3,28-29,46-48
+README.md
+  s_9fa5955d877f0d::t_577dbb5b5c2d2b 153-164
+  s_9fa5955d877f0d::t_e40a90df870c23 191-197,199,201-206,208-228,230-234,236-237
+  s_9fa5955d877f0d::t_73803084221da9 151-152
+  s_9fa5955d877f0d::t_edea65a180c6af 188-190
+  s_9fa5955d877f0d::t_b93e53c038c1dd 185-187,351
+.github/workflows/release.yml
+  s_9fa5955d877f0d::t_7be9085b16211d 88-103
+  s_9fa5955d877f0d::t_c7d129fe08cfaa 85-87
+  s_9fa5955d877f0d::t_59f0cc36eab2ea 104-106
+  s_9fa5955d877f0d::t_2100aa3eb5d4d7 1-84,107-157
+app.py
+  s_9fa5955d877f0d::t_1241c1457727e9 4319-4323
+  s_9fa5955d877f0d::t_5985320b9fe72f 3348-3352
+  s_9fa5955d877f0d::t_f62116a3fabf8f 622,626,629,631,645,1191,2744-2749
+  s_9fa5955d877f0d::t_dd2b9c78eb2185 619-621
+  s_9fa5955d877f0d::t_712af82bf576e0 623-625
+  s_9fa5955d877f0d::t_e14ca3cbf0e44a 627-628
+  s_9fa5955d877f0d::t_e835b51a5c37e5 630
+  s_9fa5955d877f0d::t_f1910dfa8b5be2 632-634,642-644
+  s_9fa5955d877f0d::t_f2998315c3adcc 646-648
+  s_9fa5955d877f0d::t_464a2b50ae4c01 1188-1190
+  s_9fa5955d877f0d::t_1bf1b0c340df64 1192-1194
+  s_9fa5955d877f0d::t_b62ee1b74b4f86 6,9,11-12,18,20,28-57,68,607-612,614-618,635-641,649-665,1186-1187,1195,4841-4843
+.github/workflows/tests.yml
+  s_9fa5955d877f0d::t_bd49c0a9bf17f4 1-30
+README.zh-CN.md
+  s_9fa5955d877f0d::t_843bacba74e897 153-160
+  s_9fa5955d877f0d::t_97c7f933e667bb 187-192,194,196-201,203-223,225-228,230
+  s_9fa5955d877f0d::t_58b4d09c0013dd 151-152
+  s_9fa5955d877f0d::t_0cccaa3a4f94b6 184-186
+  s_9fa5955d877f0d::t_fe6cddb7537f2d 181-183,344
+LICENSE
+  s_bcebec9f715f38::t_e80181134fac21 1-21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0b71810a412781d373977636c6d81d9131c20f88",
+  "prompts": {},
+  "sessions": {
+    "s_9fa5955d877f0d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1f25d526-a981-4c2d-942c-6bc284221752",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "williamoel <2797915706@qq.com>"
+    },
+    "s_bcebec9f715f38": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1204-4078-7b42-9279-491589dd2015",
+        "model": "unknown"
+      },
+      "human_author": "williamoel <2797915706@qq.com>"
+    }
+  }
+}
