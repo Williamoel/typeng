@@ -3,16 +3,21 @@ from __future__ import annotations
 import csv
 import io
 import json
+import os
 import random
 import re
+import secrets
 import sqlite3
+import sys
+import threading
 import urllib.request
 import zipfile
 from datetime import datetime, timedelta, timezone
 from math import ceil
 from pathlib import Path
+from urllib.parse import urlsplit
 
-from flask import Flask, flash, g, redirect, render_template, request, session, url_for
+from flask import Flask, abort, flash, g, redirect, render_template, request, session, url_for
 
 try:
     from opencc import OpenCC
@@ -20,9 +25,36 @@ except ImportError:
     OpenCC = None
 
 
-BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
-RESOURCE_DIR = BASE_DIR / "resources"
+def resolve_bundle_dir() -> Path:
+    """Directory that holds bundled read-only assets such as templates/ and static/."""
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
+    return Path(__file__).resolve().parent
+
+
+def resolve_app_home() -> Path:
+    """Directory for user-visible, writable app files such as data/ and resources/."""
+    env_home = os.environ.get("TYPENG_HOME", "").strip()
+    if env_home:
+        return Path(env_home).resolve()
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+def resolve_resource_dir() -> Path:
+    """Prefer external resources/ so users can drop large dictionary files beside the app."""
+    external = APP_HOME / "resources"
+    if external.exists():
+        return external
+    return APP_ROOT / "resources"
+
+
+APP_ROOT = resolve_bundle_dir()
+APP_HOME = resolve_app_home()
+BASE_DIR = APP_ROOT
+DATA_DIR = APP_HOME / "data"
+RESOURCE_DIR = resolve_resource_dir()
 DB_PATH = DATA_DIR / "typeng.db"
 BUNDLED_ECDICT_PATH = RESOURCE_DIR / "ecdict.csv"
 ECDICT_CACHE_PATH = DATA_DIR / "ecdict.csv"
@@ -33,6 +65,7 @@ WORDNET_ZIP_PATH = WORDNET_DIR / "english-wordnet-2025-json.zip"
 WORDNET_SCHEMA_VERSION = 1
 WIKTIONARY_DIR = RESOURCE_DIR / "wiktionary"
 WIKTIONARY_JSONL_CANDIDATES = [
+    APP_HOME / "kaikki.org-dictionary-English.jsonl",
     BASE_DIR / "kaikki.org-dictionary-English.jsonl",
     WIKTIONARY_DIR / "kaikki.org-dictionary-English.jsonl",
 ]
@@ -571,9 +604,65 @@ BLOCKED_EXAMPLE_WORDS = {
 }
 
 
-app = Flask(__name__)
-app.config["SECRET_KEY"] = "typeng-local-dev-key"
+app = Flask(
+    __name__,
+    template_folder=str(APP_ROOT / "templates"),
+    static_folder=str(APP_ROOT / "static"),
+)
+app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024
 OPENCC_T2S = OpenCC("t2s") if OpenCC is not None else None
+DB_INITIALIZED = False
+DB_INIT_LOCK = threading.Lock()
+
+
+def load_secret_key() -> str:
+    """Persist a per-installation random secret key under data/."""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    path = DATA_DIR / "secret_key"
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+        if value:
+            return value
+    except OSError:
+        pass
+    value = secrets.token_hex(32)
+    try:
+        path.write_text(value, encoding="utf-8")
+    except OSError:
+        pass
+    return value
+
+
+app.config["SECRET_KEY"] = os.environ.get("TYPENG_SECRET_KEY") or load_secret_key()
+
+
+def is_local_host(host_or_origin: str | None) -> bool:
+    value = (host_or_origin or "").strip()
+    if not value:
+        return False
+    if "://" not in value:
+        value = f"http://{value}"
+    try:
+        hostname = urlsplit(value).hostname or ""
+    except ValueError:
+        return False
+    return hostname.lower() in {"127.0.0.1", "localhost", "::1"}
+
+
+def is_local_origin(origin: str | None) -> bool:
+    if not origin or origin == "null":
+        return False
+    return is_local_host(origin)
+
+
+@app.before_request
+def protect_local_app() -> None:
+    if not is_local_host(request.host):
+        abort(403)
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        origin = request.headers.get("Origin")
+        if origin and not is_local_origin(origin):
+            abort(403)
 
 
 def get_db() -> sqlite3.Connection:
@@ -1094,7 +1183,16 @@ def init_db() -> None:
 
 @app.before_request
 def ensure_db() -> None:
-    init_db()
+    # init_db() runs schema migrations plus several full-table cleanup scans.
+    # Running it on every request makes large libraries increasingly slow, so
+    # run it once per process instead.
+    global DB_INITIALIZED
+    if DB_INITIALIZED:
+        return
+    with DB_INIT_LOCK:
+        if not DB_INITIALIZED:
+            init_db()
+            DB_INITIALIZED = True
 
 
 def count_words(status: str | None = None) -> int:
@@ -2643,7 +2741,12 @@ def ensure_ecdict_lookup_index() -> None:
     if table_exists and existing and existing["value"] == signature:
         return
 
-    raw = load_ecdict_data()
+    try:
+        raw = load_ecdict_data()
+    except OSError:
+        # No bundled/cached ECDICT and the download failed (e.g. offline).
+        # Skip enrichment instead of turning an import/edit into a 500.
+        return
     db.execute("DROP TABLE IF EXISTS ecdict_lookup")
     db.execute(
         """
@@ -3242,8 +3345,11 @@ def parse_word_range(prefix: str, default_start: int = 1, default_end: int = 100
         end = int(request.form.get(f"{prefix}_end", str(default_end)))
     except ValueError:
         end = default_end
-    start = max(1, start)
-    end = max(start, end)
+    # Clamp to a sane ceiling so an oversized value cannot become a SQLite
+    # LIMIT/OFFSET larger than a 64-bit integer, which would raise OverflowError.
+    max_index = 100_000_000
+    start = min(max(1, start), max_index)
+    end = min(max(start, end), max_index)
     if end - start + 1 > max_span:
         end = start + max_span - 1
     return start, end
@@ -4210,7 +4316,11 @@ def session_done():
 @app.post("/practice/finalize")
 def finalize_practice():
     missed_ids = [int(word_id) for word_id in session.get("missed_ids", [])]
-    selected_ids = {int(word_id) for word_id in request.form.getlist("wrong_ids")}
+    selected_ids = {
+        int(word_id)
+        for word_id in request.form.getlist("wrong_ids")
+        if word_id.isdigit()
+    }
 
     if missed_ids:
         db = get_db()
@@ -4728,4 +4838,6 @@ def mark_wrong(word_id: int):
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    # Werkzeug's debugger allows arbitrary Python execution from the browser;
+    # keep it opt-in and never enable it in releases.
+    app.run(host="127.0.0.1", debug=os.environ.get("TYPENG_DEBUG") == "1")

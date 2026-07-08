@@ -2,13 +2,20 @@
 
 [简体中文](#windows-打包说明)
 
-typeng is not packaged as a Windows executable yet. This document records the intended packaging workflow so the project can later ship as a simple local app:
+typeng now builds desktop packages automatically. Pushing a `v*` tag triggers
+[.github/workflows/release.yml](.github/workflows/release.yml), which uses
+PyInstaller to build Windows, macOS (Intel + Apple Silicon), and Linux zips on
+real runners and attaches them to a GitHub Release. End users just download,
+extract, and run:
 
 ```text
-download zip -> extract -> double-click typeng.exe -> browser opens typeng
+download zip -> extract -> double-click typeng.exe (or run ./typeng) -> browser opens typeng
 ```
 
-The recommended first packaging path is PyInstaller. typeng can remain a local Flask app internally: the executable starts the local server, waits until it is ready, and opens the browser at `http://127.0.0.1:5000`.
+This document records the packaging workflow so you can also build locally or
+adjust the automated build. typeng remains a local Flask app internally: the
+executable starts the local server, waits until it is ready, and opens the
+browser at the local URL (port `5000`, or another free port if 5000 is taken).
 
 ## Target Release Layout
 
@@ -107,13 +114,14 @@ For long-term polish, typeng may later use a desktop shell such as Tauri or Elec
 
 # Windows 打包说明
 
-typeng 目前还没有真正打包成 Windows 可执行文件。这份文档先记录预期的打包方案，后续目标是让普通用户可以这样使用：
+typeng 现在会自动打包桌面版本。推送一个 `v*` 标签即可触发
+[.github/workflows/release.yml](.github/workflows/release.yml)，它使用 PyInstaller 在真实的运行环境上构建 Windows、macOS（Intel + Apple Silicon）和 Linux 压缩包，并附加到 GitHub Release。普通用户只需下载、解压、运行：
 
 ```text
-下载 zip -> 解压 -> 双击 typeng.exe -> 浏览器自动打开 typeng
+下载 zip -> 解压 -> 双击 typeng.exe（或运行 ./typeng）-> 浏览器自动打开 typeng
 ```
 
-第一版建议使用 PyInstaller。typeng 内部仍然可以是本地 Flask 应用：exe 负责启动本地服务，等待服务可用，然后自动打开浏览器访问 `http://127.0.0.1:5000`。
+这份文档记录打包流程，方便你在本地自行构建或调整自动构建。typeng 内部仍然是本地 Flask 应用：exe 负责启动本地服务，等待服务可用，然后自动打开浏览器（默认 `5000` 端口，被占用时自动换一个空闲端口）。
 
 ## 目标发行目录
 

@@ -1,0 +1,157 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform_name: windows-x64
+          - os: macos-latest
+            platform_name: macos-arm64
+          - os: macos-13
+            platform_name: macos-x64
+          - os: ubuntu-latest
+            platform_name: linux-x64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build with PyInstaller (Windows)
+        if: runner.os == 'Windows'
+        run: >
+          pyinstaller --noconfirm --clean --name typeng --onedir
+          --add-data "templates;templates"
+          --add-data "static;static"
+          --add-data "samples;samples"
+          --add-data "README.md;."
+          --add-data "README.zh-CN.md;."
+          --add-data "SOURCES.md;."
+          run_typeng.py
+
+      - name: Build with PyInstaller (macOS / Linux)
+        if: runner.os != 'Windows'
+        run: >
+          pyinstaller --noconfirm --clean --name typeng --onedir
+          --add-data "templates:templates"
+          --add-data "static:static"
+          --add-data "samples:samples"
+          --add-data "README.md:."
+          --add-data "README.zh-CN.md:."
+          --add-data "SOURCES.md:."
+          run_typeng.py
+
+      - name: Add user-facing folders and docs to the bundle
+        shell: bash
+        run: |
+          mkdir -p dist/typeng/data
+          mkdir -p dist/typeng/resources/wordnet
+          mkdir -p dist/typeng/resources/wiktionary
+          cp README.md README.zh-CN.md SOURCES.md dist/typeng/
+          cp resources/README.md dist/typeng/resources/README.md
+          cp -r samples dist/typeng/ 2>/dev/null || true
+
+      - name: Smoke test the built executable
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            EXE="dist/typeng/typeng.exe"
+          else
+            EXE="dist/typeng/typeng"
+          fi
+          "$EXE" &
+          APP_PID=$!
+          URL=""
+          # The launcher falls back to a random port if 5000 is taken (common on
+          # macOS, where AirPlay Receiver binds 5000), and writes the real URL to
+          # data/server_url.txt. Read it instead of assuming port 5000.
+          for i in $(seq 1 30); do
+            if [ -z "$URL" ] && [ -f dist/typeng/data/server_url.txt ]; then
+              URL="$(cat dist/typeng/data/server_url.txt)"
+            fi
+            if [ -n "$URL" ] && curl -sf "$URL" > /dev/null; then
+              echo "Server responded at $URL"
+              kill "$APP_PID"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Server did not respond within 30s (URL='$URL')" >&2
+          kill "$APP_PID" || true
+          exit 1
+
+      - name: Zip the bundle
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME:-dev}"
+          ZIP_NAME="typeng-${VERSION}-${{ matrix.platform_name }}.zip"
+          echo "ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
+          cd dist
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "../$ZIP_NAME" typeng
+          else
+            zip -qr "../$ZIP_NAME" typeng
+          fi
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_NAME }}
+          path: ${{ env.ZIP_NAME }}
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release and attach packages
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.zip
+          generate_release_notes: true
+          body: |
+            Desktop packages built automatically by GitHub Actions.
+
+            **Windows**: download the `windows-x64` zip, extract it, and
+            double-click `typeng.exe`. The browser opens automatically.
+
+            **macOS**: download the `macos-arm64` (Apple Silicon) or
+            `macos-x64` (Intel) zip, extract it, then run `typeng` inside the
+            folder. If macOS blocks the unsigned app, right-click and choose
+            Open, or run `xattr -dr com.apple.quarantine <extracted folder>`.
+
+            **Linux**: download the `linux-x64` zip, extract it, then run
+            `./typeng`.
+
+            Optional dictionary resources can be placed into the extracted
+            `resources/` folder. See `SOURCES.md` and `resources/README.md`.

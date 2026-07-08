@@ -154,14 +154,22 @@
         return;
       }
       didPlay = true;
-      playWord(word);
       window.removeEventListener("click", tryPlay);
       window.removeEventListener("keydown", tryPlay);
+      playWord(word);
     };
 
-    setTimeout(tryPlay, 250);
-    window.addEventListener("click", tryPlay, { once: true });
-    window.addEventListener("keydown", tryPlay, { once: true });
+    // Browsers block audio autoplay until the page has had a user gesture.
+    // If activation already exists (e.g. mid-session navigation), play now;
+    // otherwise wait for the first click/keypress instead of firing an eager
+    // timer that would silently fail and consume the one recovery attempt.
+    const activation = window.navigator && window.navigator.userActivation;
+    if (activation && activation.hasBeenActive) {
+      tryPlay();
+    } else {
+      window.addEventListener("click", tryPlay, { once: true });
+      window.addEventListener("keydown", tryPlay, { once: true });
+    }
   }
 
   document.addEventListener("DOMContentLoaded", () => {

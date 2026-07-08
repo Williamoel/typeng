@@ -148,7 +148,20 @@ License: the Open English WordNet project states that it uses CC-BY 4.0.
 
 ### Youdao Dictionary audio interface
 
-typeng currently uses Youdao Dictionary's `dictvoice` audio interface for UK and US pronunciation, and tries to fall back to the browser's built-in speech synthesis when that interface is unavailable. This feature requires the browser to be able to access the corresponding Youdao audio URL; if the app is used completely offline, automatic pronunciation may not be available.
+typeng currently uses Youdao Dictionary's `dictvoice` audio interface for UK and US pronunciation, and tries to fall back to the browser's built-in speech synthesis when that interface is unavailable. When pronunciation is enabled, the browser requests the current practice word from Youdao's audio URL; if the app is used completely offline, automatic pronunciation may not be available.
+
+## Privacy
+
+typeng is local-first: your word libraries, learning progress, and the SQLite
+database never leave your computer, and there is no account system, telemetry,
+or cloud sync.
+
+The one exception is optional pronunciation. When audio playback is enabled,
+the browser requests the current practice word from Youdao Dictionary's public
+`dictvoice` audio endpoint, so that single word is sent to Youdao's servers. If
+you prefer to stay fully offline, turn off automatic pronunciation in the
+practice options; typeng then falls back to the browser's built-in speech
+synthesis, which does not make network requests.
 
 ## Run Locally
 
@@ -169,18 +182,59 @@ http://127.0.0.1:5000
 
 This is a local Flask web application. Opening `127.0.0.1` does not require a VPN or an internet connection.
 
-## Distribution Plan
+To test the desktop-style launcher, you can also run:
 
-typeng's target distribution format is a local zip package for ordinary Windows users:
+```bash
+python run_typeng.py
+```
 
-1. Download the typeng zip package.
-2. Extract it to a local folder.
+## Download and Run
+
+typeng ships as a self-contained local zip for each platform. You do not need
+to install Python, enter WSL, create a virtual environment, or type any Flask
+commands. Download, extract, and run — the app starts a local server and opens
+in your browser automatically. All data (SQLite database, dictionary resources,
+learning records) stays on your computer.
+
+Get the latest packages from the releases page:
+
+**<https://github.com/Williamoel/typeng/releases/latest>**
+
+### Windows
+
+1. Download `typeng-<version>-windows-x64.zip`.
+2. Extract the whole folder.
 3. Double-click `typeng.exe`.
-4. The program starts the local service automatically and opens typeng in the browser.
+4. The first time, Windows SmartScreen may warn about an unrecognized app
+   (typeng is not code-signed yet). Click **More info → Run anyway**.
 
-In this workflow, users do not need to manually enter WSL, create a virtual environment, or type Flask startup commands. The SQLite database, dictionary resources, and learning records are all kept locally. The current repository has not finished desktop packaging yet; this will be a later release goal.
+### macOS
 
-The planned Windows packaging workflow, resource layout, and pre-release checklist are documented in [PACKAGING.md](PACKAGING.md).
+1. Download `typeng-<version>-macos-arm64.zip` (Apple Silicon: M1/M2/M3) or
+   `typeng-<version>-macos-x64.zip` (Intel).
+2. Extract the folder, then run `typeng` inside it.
+3. Because the app is unsigned, macOS Gatekeeper may block it on first launch.
+   Right-click `typeng` and choose **Open**, or run once in Terminal:
+
+   ```bash
+   xattr -dr com.apple.quarantine <extracted-folder>
+   ```
+
+### Linux
+
+1. Download `typeng-<version>-linux-x64.zip`.
+2. Extract the folder, then run `./typeng` inside it.
+
+### Optional dictionary resources
+
+Released packages include empty `resources/` folders but not the large
+dictionary files (ECDICT, Wiktionary, WordNet), which are big and carry their
+own licenses. To enable preset exam libraries, English definitions, and example
+sentences, drop those files into the extracted `resources/` folder as described
+in [resources/README.md](resources/README.md) and [SOURCES.md](SOURCES.md).
+
+Maintainers who want to build the packages themselves can follow
+[PACKAGING.md](PACKAGING.md).
 
 ## Import Format
 
@@ -294,6 +348,6 @@ The biggest inspiration for this project is [Dr.eye](https://www.dreye.com/). I 
 
 ## License
 
-Project license: to be decided.
+typeng is released under the MIT License. See [LICENSE](LICENSE).
 
 Dictionary and word-library resources keep their own licenses. See [SOURCES.md](SOURCES.md) and [resources/README.md](resources/README.md).
