@@ -1,6 +1,6 @@
 # typeng
 
-Non-Chinese users can refer to an English version of README: [English](README.md).
+Non-Chinese users can refer to [an English version of README](README.md).
 
 typeng 是一款本地优先的英语单词打字记忆工具，使用 Python、Flask、SQLite 和本地网页界面构建。
 

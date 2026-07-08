@@ -1,6 +1,6 @@
 # typeng
 
-Chinese users can refer to the Chinese README: [中文](README.zh-CN.md).
+中文用户可选择[中文版README](README.zh-CN.md)进行查看。
 
 typeng is a local-first English vocabulary typing and memorization tool built with Python, Flask, SQLite, and a local web interface.
 
