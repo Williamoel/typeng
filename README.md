@@ -10,35 +10,33 @@ It is designed for English learners who want to memorize words through active ty
 
 ![Typing words](./images/typing_word.png)
 
-Like other typing-based vocabulary tools, typeng provides a regular mode with Chinese meanings, parts of speech, phonetics, automatic pronunciation with both UK and US audio, and English definitions. Words in the library are divided into more detailed entries by part of speech, so users can fully learn the meanings and usage of different parts of speech. We especially added English definitions for the corresponding part of speech, because advanced English learners should not be limited to memorizing Chinese meanings; they can further use English definitions to clarify the context of a word.
+typeng's regular practice can show Chinese meanings, parts of speech, phonetics, UK/US pronunciation, and English definitions at the same time. The same word is split into more detailed entries by part of speech, so users can learn the meanings and usage of each part of speech separately. English definitions for the matching part of speech are especially useful for more advanced learners, because they help users move beyond Chinese meanings and understand the word's context more directly.
 
-When a user misspells a word, typeng immediately shows the correct spelling. After the user finishes spelling all new words, typeng asks them to spell the previously missed words again until every word in the current group has been spelled correctly once. Misspelled words can then be added to the wrong-word book by the user's own choice for future review and consolidation.
+If a user misspells a word, typeng immediately shows the correct spelling. After the current group of new words ends, typeng asks the user to practice the missed words again until every word in the group has been spelled correctly once. Users can then decide which missed words should enter the wrong-word book for later review.
 
 ![Mode choices](./images/mode_choice.png)
 
-For word learning, typeng tries to give users as much personalization as possible. Users can freely choose how many entries to study next, and they can also choose modes to match their preferences.
+typeng tries to leave the learning rhythm to the user. Users can choose how many entries to study next, and freely combine Chinese prompts, English definitions, phonetics, automatic pronunciation, and cloze practice.
 
-The cloze mode is what makes typeng different from most vocabulary-learning tools. Most tools only let users quickly glance through example sentences, with the main focus still on memorizing words. Users often stop at the stage of recognition. typeng, however, removes the target word or its inflected form from an existing example and asks the user to spell it, so users can better understand the context, usage, and even inflected forms of the word. `With cloze` mode runs a round of contextual spelling practice after regular word spelling. `Only in cloze` mode only runs contextual spelling practice, while words without examples fall back to regular spelling.
+Cloze is the most important difference in typeng. Many tools only let users quickly glance at example sentences, so learning often stays at the level of recognition. typeng removes the target word or its inflected form from an example sentence and asks the user to spell it in context. `With cloze` adds a round of contextual practice after regular spelling, while `Only in cloze` focuses on contextual practice and falls back to regular spelling for entries without examples.
 
 ![Context practice](./images/filling_cloze.png)
 
-For every entry that has an example, cloze mode removes the target word or one of its forms from the example and asks the user to spell it correctly. This lets users learn usage and collocation in a real context instead of memorizing isolated meanings.
+In cloze practice, users do not recall words from isolated meanings. They complete the target word or one of its forms inside a real sentence, which trains spelling, collocation, and word forms in a way that is closer to actual use.
 
 ![Import and exclusion](./images/import_and_exclude.png)
 
-To let users personalize their own libraries, typeng provides efficient import operations. Users can quickly build a library by importing TXT or CSV files in the formats allowed by the `Format Guide`.
-
-Because the preset libraries contain many basic words, users can use overlap exclusion to remove words that are too easy or already learned in other libraries, which helps speed up learning. typeng also provides quick batch deletion for large numbers of entries.
+To help users build their own libraries, typeng supports TXT/CSV import according to the `Format Guide`, and it can exclude overlapping entries between local libraries. For example, if a user has already learned CET-level basic words, they can remove overlapping entries from a higher-level library such as TOEFL and avoid unnecessary repetition. The editing interface also supports batch deletion for larger cleanup work.
 
 ![Automatic filling](./images/auto_filling.png)
 
-Many users only want to provide the words they want to learn and do not want to fill in examples or even Chinese meanings themselves, so typeng provides automatic filling. For a selected range of words, clicking `Fill examples` makes typeng automatically match suitable dictionary examples according to each entry's part of speech. For the small number of words or parts of speech that cannot be matched with examples, users can click `Preview cleanup` to preview those entries and decide whether to keep them.
+Many users may only want to provide the words first, so typeng provides automatic filling. Users can ask the system to match example sentences by part of speech within a selected range, and use `Preview cleanup` to check entries that still do not have reliable examples before deciding whether to keep them.
 
-When users manually add words without entering Chinese meanings, typeng automatically looks up dictionary meanings that match the part of speech and fills them in. If no part of speech is provided, typeng creates multiple entries according to the parts of speech found in the dictionary.
+When a manually added word has no Chinese meaning, typeng tries to fill it from the local dictionary by matching the part of speech. If the user only enters the word, typeng can also split it into multiple entries according to the parts of speech found in the dictionary.
 
 ![Review settings](./images/review_choice.png)
 
-Each library has independent study, wrong-word, and spaced-review states. For learned words and wrong words, typeng gives review suggestions according to when each word was learned and the Ebbinghaus forgetting curve, while still allowing users to personalize the number of words to review and the number of review rounds they want.
+Each library has independent study, wrong-word, and spaced-review states. typeng gives review suggestions according to when each word was learned and the Ebbinghaus forgetting curve, while users can still adjust how many words to review this time and how many successful review rounds a word needs before reminders stop.
 
 ## Why typeng
 
@@ -290,9 +288,9 @@ Long term:
 
 ## Acknowledgements
 
-The biggest inspiration for this project is Dr.eye. I have used it for almost fifteen years. Without it, I would not have known that words can be memorized through muscle memory, and a large part of my vocabulary accumulation came from it. I also want to thank 词达人 for the inspiration behind contextual fill-in-the-blank practice.
+The biggest inspiration for this project is [Dr.eye](https://www.dreye.com/). I have used it for almost fifteen years. Without it, I would not have known that words can be memorized through muscle memory, and a large part of my vocabulary accumulation came from it. I also want to thank [词达人](https://www.unipus.cn/) for the inspiration behind contextual fill-in-the-blank practice.
 
-Querty Learner is a vocabulary memorization and English muscle-memory training tool designed for keyboard workers. I only learned about it after I already had the rough idea for typeng, but I found it unfortunate that it does not include contextual practice. During development, Querty Learner also gave me useful inspiration for solving the word-audio problem.
+[Qwerty Learner](https://qwerty.kaiyi.cool/) is a vocabulary memorization and English muscle-memory training tool designed for keyboard workers. I only learned about it after I already had the rough idea for typeng, but I found it unfortunate that it does not include contextual practice. During development, Qwerty Learner also gave me useful inspiration for solving the word-audio problem. Its open-source repository is [RealKai42/qwerty-learner](https://github.com/RealKai42/qwerty-learner).
 
 ## License
 
