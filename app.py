@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import random
 import re
 import sqlite3
 import urllib.request
@@ -1972,6 +1973,7 @@ def simplify_chinese(text: str | None) -> str | None:
 def fill_examples_from_dictionaries(
     start: int = 1,
     end: int = 100,
+    mode: str = "best",
 ) -> tuple[int, int]:
     if not WORDNET_ZIP_PATH.exists() and not wiktionary_jsonl_path():
         return 0, -1
@@ -1995,6 +1997,12 @@ def fill_examples_from_dictionaries(
             if definition:
                 definitions[int(row["id"])] = definition
 
+        if mode == "refresh":
+            lookup = refresh_example_candidate(word, part_of_speech, row["example_sentence"], top_n=8)
+            if lookup:
+                matches[int(row["id"])] = (lookup["example_sentence"], lookup["definition"])
+            continue
+
         lookup = lookup_wiktionary_example(word, part_of_speech)
         if lookup:
             matches[int(row["id"])] = (lookup["example_sentence"], lookup["definition"])
@@ -2004,20 +2012,21 @@ def fill_examples_from_dictionaries(
             matches[int(row["id"])] = (lookup["example_sentence"], lookup["definition"])
 
     missing_ids = sorted({int(row["id"]) for row in rows} - set(matches))
-    for batch_start in range(0, len(missing_ids), 500):
-        batch = missing_ids[batch_start : batch_start + 500]
-        placeholders = ",".join("?" for _ in batch)
-        get_db().execute(
-            f"""
-            UPDATE words
-            SET example_sentence = NULL,
-                example_translation = NULL,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE library_id = ?
-              AND id IN ({placeholders})
-            """,
-            [get_active_library_id(), *batch],
-        )
+    if mode != "refresh":
+        for batch_start in range(0, len(missing_ids), 500):
+            batch = missing_ids[batch_start : batch_start + 500]
+            placeholders = ",".join("?" for _ in batch)
+            get_db().execute(
+                f"""
+                UPDATE words
+                SET example_sentence = NULL,
+                    example_translation = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE library_id = ?
+                  AND id IN ({placeholders})
+                """,
+                [get_active_library_id(), *batch],
+            )
 
     for word_id, (sentence, example_definition) in matches.items():
         definition = definitions.get(word_id) or example_definition
@@ -2849,13 +2858,13 @@ def ensure_wordnet_lookup_index() -> None:
     db.commit()
 
 
-def lookup_wordnet_example(word: str, part_of_speech: str) -> sqlite3.Row | None:
+def ranked_wordnet_example_candidates(word: str, part_of_speech: str, limit: int = 20) -> list[sqlite3.Row]:
     if not word.strip() or not WORDNET_ZIP_PATH.exists():
-        return None
+        return []
     ensure_wordnet_lookup_index()
     part_group = wordnet_part_group(part_of_speech)
     if part_group not in {"n", "v", "a", "r"}:
-        return None
+        return []
     rows = get_db().execute(
         """
         SELECT example_sentence, definition, synset_id
@@ -2866,8 +2875,7 @@ def lookup_wordnet_example(word: str, part_of_speech: str) -> sqlite3.Row | None
         """,
         (word.strip().lower(), part_group),
     ).fetchall()
-    best = None
-    best_score = None
+    scored: list[tuple[tuple[int, int, int, int, str], sqlite3.Row]] = []
     for row in rows:
         sentence = row["example_sentence"]
         if not usable_wordnet_example(sentence, word):
@@ -2875,10 +2883,14 @@ def lookup_wordnet_example(word: str, part_of_speech: str) -> sqlite3.Row | None
         score = sentence_quality_score(sentence, word, part_of_speech, source="wordnet")
         if score[1] >= 6:
             continue
-        if best_score is None or score < best_score:
-            best = row
-            best_score = score
-    return best
+        scored.append((score, row))
+    scored.sort(key=lambda item: item[0])
+    return [row for _, row in scored[:limit]]
+
+
+def lookup_wordnet_example(word: str, part_of_speech: str) -> sqlite3.Row | None:
+    candidates = ranked_wordnet_example_candidates(word, part_of_speech, limit=1)
+    return candidates[0] if candidates else None
 
 
 def ensure_wiktionary_lookup_index(target_words: set[str] | None = None) -> None:
@@ -3068,9 +3080,9 @@ def ensure_wiktionary_lookup_index(target_words: set[str] | None = None) -> None
     db.commit()
 
 
-def lookup_wiktionary_example(word: str, part_of_speech: str) -> sqlite3.Row | None:
+def ranked_wiktionary_example_candidates(word: str, part_of_speech: str, limit: int = 8) -> list[sqlite3.Row]:
     if not word.strip() or not wiktionary_jsonl_path():
-        return None
+        return []
     ensure_wiktionary_lookup_index({word.strip().lower()})
     lookup_groups = wiktionary_lookup_groups(part_of_speech, word)
     placeholders = ",".join("?" for _ in lookup_groups)
@@ -3099,8 +3111,7 @@ def lookup_wiktionary_example(word: str, part_of_speech: str) -> sqlite3.Row | N
         if not ({"archaic", "obsolete", "dated", "rare"} & tags)
     ]
 
-    best = None
-    best_score = None
+    scored: list[tuple[tuple[int, int, bool, int, int, str], sqlite3.Row]] = []
     for row, tags in candidates:
         tag_penalty = 0
         if requested_group == "aux":
@@ -3130,10 +3141,14 @@ def lookup_wiktionary_example(word: str, part_of_speech: str) -> sqlite3.Row | N
             continue
         short_sentence_penalty = 0 if english_word_count(sentence) >= 6 else 1
         ranked_score = (tag_penalty, short_sentence_penalty, row["example_type"] == "quotation", score[2], score[3], score[4])
-        if best_score is None or ranked_score < best_score:
-            best = row
-            best_score = ranked_score
-    return best
+        scored.append((ranked_score, row))
+    scored.sort(key=lambda item: item[0])
+    return [row for _, row in scored[:limit]]
+
+
+def lookup_wiktionary_example(word: str, part_of_speech: str) -> sqlite3.Row | None:
+    candidates = ranked_wiktionary_example_candidates(word, part_of_speech, limit=1)
+    return candidates[0] if candidates else None
 
 
 def lookup_wiktionary_definition(word: str, part_of_speech: str) -> str | None:
@@ -3168,6 +3183,36 @@ def lookup_wiktionary_definition(word: str, part_of_speech: str) -> str | None:
         if len(definitions) >= 4:
             break
     return "\n".join(definitions) if definitions else None
+
+
+def refresh_example_candidate(
+    word: str,
+    part_of_speech: str,
+    current_sentence: str | None = None,
+    top_n: int = 8,
+) -> sqlite3.Row | None:
+    current = (current_sentence or "").strip()
+    seen_sentences = {current} if current else set()
+    candidates: list[sqlite3.Row] = []
+
+    for row in ranked_wiktionary_example_candidates(word, part_of_speech, limit=top_n):
+        sentence = str(row["example_sentence"] or "").strip()
+        if not sentence or sentence in seen_sentences:
+            continue
+        seen_sentences.add(sentence)
+        candidates.append(row)
+
+    if len(candidates) < top_n:
+        for row in ranked_wordnet_example_candidates(word, part_of_speech, limit=top_n):
+            sentence = str(row["example_sentence"] or "").strip()
+            if not sentence or sentence in seen_sentences:
+                continue
+            seen_sentences.add(sentence)
+            candidates.append(row)
+            if len(candidates) >= top_n:
+                break
+
+    return random.choice(candidates[:top_n]) if candidates else None
 
 
 def lookup_wordnet_definition(word: str, part_of_speech: str) -> str | None:
@@ -3690,15 +3735,20 @@ def fill_auto_examples():
         return redirect(url_for("index", edit=1))
 
     start, end = parse_word_range("example", default_start=1, default_end=100, max_span=2000)
+    mode = request.form.get("example_mode", "best")
+    if mode not in {"best", "refresh"}:
+        mode = "best"
     matched, checked = fill_examples_from_dictionaries(
         start,
         end,
+        mode=mode,
     )
     if checked == 0:
         flash(f"No words found in range {start}-{end}.", "success")
     else:
+        action = "refreshed from top-8 suitable candidates" if mode == "refresh" else "filled with the best candidates"
         flash(
-            f"Auto examples updated {matched} example sentences after checking {checked} words in range {start}-{end}.",
+            f"Auto examples {action}: updated {matched} example sentences after checking {checked} words in range {start}-{end}.",
             "success",
         )
     return redirect(url_for("index", edit=1))

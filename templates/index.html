@@ -147,14 +147,15 @@
   <section class="panel auto-examples-panel">
     <div class="section-heading compact-heading">
       <h2>Auto Examples</h2>
-      <p>Fill or refresh examples from Wiktionary first, then WordNet. The selected word range is always refreshed.</p>
+      <p>Fill examples uses the best candidate. Refresh examples randomly picks from the top 8 suitable candidates in the same word range.</p>
     </div>
     <form class="auto-examples-form" action="{{ url_for('fill_auto_examples') }}" method="post">
       <label for="example_start">Words from</label>
       <input id="example_start" name="example_start" type="number" min="1" value="1">
       <label for="example_end">to</label>
       <input id="example_end" name="example_end" type="number" min="1" value="100">
-      <button type="submit">Fill examples</button>
+      <button type="submit" name="example_mode" value="best">Fill examples</button>
+      <button type="submit" name="example_mode" value="refresh" class="secondary">Refresh examples</button>
     </form>
     <div class="maintenance-row">
       <span>Remove word + part entries unsupported by Wiktionary and WordNet.</span>

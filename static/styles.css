@@ -748,7 +748,7 @@ h2 {
 }
 
 .auto-examples-form {
-  grid-template-columns: auto 86px auto 86px auto;
+  grid-template-columns: auto 86px auto 86px auto auto;
   align-items: center;
   justify-content: start;
   color: var(--muted);

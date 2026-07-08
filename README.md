@@ -30,7 +30,7 @@ To help users build their own libraries, typeng supports TXT/CSV import accordin
 
 ![Automatic filling](./images/auto_filling.png)
 
-Many users may only want to provide the words first, so typeng provides automatic filling. Users can ask the system to match example sentences by part of speech within a selected range, and use `Preview cleanup` to check entries that still do not have reliable examples before deciding whether to keep them.
+Many users may only want to provide the words first, so typeng provides automatic filling. Users can ask the system to match example sentences by part of speech within a selected range. `Fill examples` chooses the highest-scoring example, while `Refresh examples` randomly replaces examples in the same range from the top 8 suitable candidates. Users can also use `Preview cleanup` to check entries that still do not have reliable examples before deciding whether to keep them.
 
 When a manually added word has no Chinese meaning, typeng tries to fill it from the local dictionary by matching the part of speech. If the user only enters the word, typeng can also split it into multiple entries according to the parts of speech found in the dictionary.
 
