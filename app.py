@@ -1179,6 +1179,7 @@ def migrate_db(db: sqlite3.Connection) -> None:
         "review_stage": "ALTER TABLE words ADD COLUMN review_stage INTEGER NOT NULL DEFAULT 0",
         "next_review_at": "ALTER TABLE words ADD COLUMN next_review_at TEXT",
         "last_reviewed_at": "ALTER TABLE words ADD COLUMN last_reviewed_at TEXT",
+        "example_note": "ALTER TABLE words ADD COLUMN example_note TEXT",
     }.items():
         if column_name not in columns:
             db.execute(column_sql)
@@ -1245,6 +1246,7 @@ def init_db() -> None:
             meaning TEXT NOT NULL,
             example_sentence TEXT,
             example_translation TEXT,
+            example_note TEXT,
             phonetic TEXT,
             definition TEXT,
             frequency INTEGER,
@@ -1697,6 +1699,7 @@ def clear_invalid_example_sentences(db: sqlite3.Connection) -> None:
             f"""
             UPDATE words
             SET example_sentence = NULL,
+                example_note = NULL,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id IN ({placeholders})
             """,
@@ -2251,12 +2254,42 @@ def wiktionary_example_rank(example: dict[str, object], sentence: str) -> int:
     return rank
 
 
+# Sense tags worth warning the learner about when they appear on an example.
+# Mapped to a short human-readable label shown in cloze practice.
+NOTABLE_EXAMPLE_TAGS = {
+    "archaic": "archaic usage",
+    "obsolete": "obsolete usage",
+    "dated": "dated usage",
+    "rare": "rare usage",
+}
+
+
+def example_note_from_tags(sense_tags: str | None) -> str | None:
+    """Return a short note (e.g. 'archaic usage') if the example's sense carries
+    a notable tag, so cloze practice can warn the learner that the sentence may
+    read oddly. Returns None for ordinary examples."""
+    if not sense_tags:
+        return None
+    tags = {tag.strip().lower() for tag in str(sense_tags).split(",") if tag.strip()}
+    labels = [label for tag, label in NOTABLE_EXAMPLE_TAGS.items() if tag in tags]
+    return "; ".join(labels) if labels else None
+
+
 def simplify_chinese(text: str | None) -> str | None:
     if text is None:
         return None
     if OPENCC_T2S is not None:
         return OPENCC_T2S.convert(text)
     return text.translate(TRADITIONAL_TO_SIMPLIFIED)
+
+
+def _lookup_note(lookup: sqlite3.Row) -> str | None:
+    """Extract an example note (e.g. 'archaic usage') from a lookup row.
+    WordNet rows have no sense_tags, so guard the access."""
+    try:
+        return example_note_from_tags(lookup["sense_tags"])
+    except (IndexError, KeyError):
+        return None
 
 
 def fill_examples_from_dictionaries(
@@ -2290,7 +2323,7 @@ def fill_examples_from_dictionaries(
             # Refresh replaces the current example with a different candidate.
             lookup = refresh_example_candidate(word, part_of_speech, row["example_sentence"], top_n=8)
             if lookup:
-                matches[int(row["id"])] = (lookup["example_sentence"], lookup["definition"])
+                matches[int(row["id"])] = (lookup["example_sentence"], lookup["definition"], _lookup_note(lookup))
             continue
 
         # Fill (best) only fills entries that have no example yet. A word that
@@ -2300,26 +2333,27 @@ def fill_examples_from_dictionaries(
             continue
         lookup = lookup_wiktionary_example(word, part_of_speech)
         if lookup:
-            matches[int(row["id"])] = (lookup["example_sentence"], lookup["definition"])
+            matches[int(row["id"])] = (lookup["example_sentence"], lookup["definition"], _lookup_note(lookup))
             continue
         lookup = lookup_wordnet_example(word, part_of_speech)
         if lookup:
-            matches[int(row["id"])] = (lookup["example_sentence"], lookup["definition"])
+            matches[int(row["id"])] = (lookup["example_sentence"], lookup["definition"], _lookup_note(lookup))
 
     # Neither mode clears existing content: fill only adds where empty, and
     # refresh only replaces entries that found a new candidate.
-    for word_id, (sentence, example_definition) in matches.items():
+    for word_id, (sentence, example_definition, note) in matches.items():
         definition = definitions.get(word_id) or example_definition
         get_db().execute(
             """
             UPDATE words
             SET example_sentence = ?,
                 example_translation = NULL,
+                example_note = ?,
                 definition = COALESCE(?, definition),
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ? AND library_id = ?
             """,
-            (sentence, definition, word_id, get_active_library_id()),
+            (sentence, note, definition, word_id, get_active_library_id()),
         )
     definition_only_ids = sorted(set(definitions) - set(matches))
     for batch_start in range(0, len(definition_only_ids), 500):
@@ -4687,6 +4721,7 @@ def edit_word(word_id: int):
                 meaning = ?,
                 example_sentence = ?,
                 example_translation = NULL,
+                example_note = NULL,
                 phonetic = COALESCE(?, phonetic),
                 definition = COALESCE(?, definition),
                 frequency = COALESCE(?, frequency),
@@ -4850,6 +4885,7 @@ def save_page_edits():
                     meaning = ?,
                     example_sentence = ?,
                     example_translation = NULL,
+                    example_note = NULL,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ? AND library_id = ?
                 """,

@@ -1381,6 +1381,18 @@ a.save-done-button {
   line-height: 1.45;
 }
 
+.example-note-warning {
+  width: min(100%, 680px);
+  margin: 0 auto 12px;
+  padding: 8px 12px;
+  border-left: 4px solid #e67e22;
+  background: #fff7ed;
+  color: #9a5b1c;
+  font-size: 15px;
+  line-height: 1.4;
+  border-radius: 6px;
+}
+
 .definition-prompt {
   width: min(100%, 720px);
   margin: 0 auto 14px;

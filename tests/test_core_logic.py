@@ -371,3 +371,17 @@ def test_ranked_candidates_falls_back_to_archaic_when_only_option(monkeypatch):
     out = app.ranked_wiktionary_example_candidates("rectangle", "noun")
     assert len(out) >= 1
     assert "rectangle" in out[0]["example_sentence"].lower()
+
+
+# --- example_note_from_tags (regression: archaic example warning) ----------
+
+def test_example_note_from_tags_flags_archaic():
+    assert app.example_note_from_tags("archaic") == "archaic usage"
+    assert app.example_note_from_tags("obsolete,rare") is not None
+    assert "obsolete usage" in app.example_note_from_tags("obsolete")
+
+
+def test_example_note_from_tags_ignores_ordinary():
+    assert app.example_note_from_tags(None) is None
+    assert app.example_note_from_tags("") is None
+    assert app.example_note_from_tags("transitive,informal") is None
