@@ -1,0 +1,23 @@
+run_typeng.py
+  s_9fa5955d877f0d::t_a7760ab21b7d9f 26-27,29-32
+  s_9fa5955d877f0d::t_604ab13a09f023 70-78,86
+  s_9fa5955d877f0d::t_822ebc98174ae9 93
+app.py
+  s_9fa5955d877f0d::t_d55cea2a714027 35-98,100-108,112,114-121,126-135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3371141965e1db3ecd929b194c5f988cc15a76cf",
+  "prompts": {},
+  "sessions": {
+    "s_9fa5955d877f0d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1f25d526-a981-4c2d-942c-6bc284221752",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "williamoel <2797915706@qq.com>"
+    }
+  }
+}
