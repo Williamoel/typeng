@@ -948,6 +948,25 @@ h2 {
   justify-self: end;
 }
 
+.edit-actions-group {
+  grid-area: save;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.edit-actions-group .save-done-button {
+  grid-area: auto;
+}
+
+a.save-done-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
 .view-edit-button {
   grid-area: edit;
   justify-self: end;
@@ -1569,6 +1588,7 @@ h2 {
   .edit-sort-control,
   .view-sort-control,
   .edit-library-head .save-done-button,
+  .edit-actions-group,
   .view-edit-button {
     justify-self: start;
   }

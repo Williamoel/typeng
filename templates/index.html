@@ -225,7 +225,10 @@
           </select>
         </label>
       </form>
-      <button type="submit" class="secondary save-done-button" form="edit-page-form">Save and done</button>
+      <div class="edit-actions-group">
+        <button type="submit" class="secondary save-done-button" form="edit-page-form" name="stay" value="1">Save</button>
+        <a class="secondary-button save-done-button" href="{{ url_for('index') }}">Done</a>
+      </div>
       <div class="library-title-group">
         <h2>Word Library</h2>
         <p>Same word with different parts of speech is kept as separate knowledge.</p>
@@ -305,6 +308,7 @@
             <input type="checkbox" data-select-all-words>
             Select this page
           </label>
+          <button type="button" class="secondary tiny" data-invert-selection>Invert selection</button>
           <span data-selected-count>0 selected</span>
           <button type="submit" class="danger tiny" disabled data-bulk-delete-button>Delete selected</button>
         </div>

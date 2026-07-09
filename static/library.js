@@ -134,6 +134,7 @@
 
     const checkboxes = Array.from(document.querySelectorAll("[data-word-select]"));
     const selectAll = document.querySelector("[data-select-all-words]");
+    const invertButton = document.querySelector("[data-invert-selection]");
     const countLabel = document.querySelector("[data-selected-count]");
     const deleteButton = document.querySelector("[data-bulk-delete-button]");
 
@@ -163,6 +164,17 @@
       selectAll.addEventListener("change", () => {
         checkboxes.forEach((checkbox) => {
           checkbox.checked = selectAll.checked;
+        });
+        updateState();
+      });
+    }
+
+    if (invertButton) {
+      // Flip every checkbox: check the 5 words you want to keep, click Invert,
+      // and the other 95 become selected for deletion in one step.
+      invertButton.addEventListener("click", () => {
+        checkboxes.forEach((checkbox) => {
+          checkbox.checked = !checkbox.checked;
         });
         updateState();
       });

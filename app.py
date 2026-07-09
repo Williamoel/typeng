@@ -4595,6 +4595,10 @@ def save_page_edits():
         return redirect(url_for("index", **edit_redirect_args))
 
     flash(f"Saved {len(updates)} words.", "success")
+    # "Save" keeps the user in edit mode on the same page/search/sort; the
+    # separate "Done" link exits without saving.
+    if request.form.get("stay") == "1":
+        return redirect(url_for("index", **edit_redirect_args))
     return redirect(url_for("index"))
 
 
