@@ -269,3 +269,39 @@ def test_import_without_ecdict_resource_does_not_crash(monkeypatch, tmp_path):
         app.enrich_entries_from_ecdict(entries)
         inserted, updated, _ = app.import_entries(entries, library_id=1)
         assert inserted == 1
+
+
+# --- extract_example_sentence (regression: common words with only long quotes) ---
+
+def test_extract_pulls_sentence_with_target_from_long_quote():
+    # A multi-sentence quotation where only one sentence uses the word.
+    text = ("The admirable smoothness reflected great credit on the crew. "
+            "Fuel was held back so as to create shortages and dissatisfaction.")
+    out = app.extract_example_sentence(text, "shortage")
+    assert "shortage" in out.lower()
+    assert out.count(".") <= 1  # a single sentence, not the whole passage
+
+
+def test_extract_returns_single_sentence_unchanged():
+    text = "She walked home slowly."
+    assert app.extract_example_sentence(text, "walk") == text
+
+
+def test_extract_prefers_shortest_matching_sentence():
+    text = ("Reliability matters. Punctuality and reliability remain the bedrock "
+            "of a successful national railway network over many decades.")
+    out = app.extract_example_sentence(text, "reliability")
+    assert out == "Reliability matters."
+
+
+def test_extract_empty_text():
+    assert app.extract_example_sentence("", "walk") == ""
+
+
+def test_long_single_sentence_common_word_is_usable():
+    # ~220 chars, single sentence, common verb — must pass the 240 cap.
+    text = ("In polling by the research center that year, fully half the "
+            "respondents thought the two parties would cooperate more in the "
+            "coming year, versus those who thought otherwise entirely today.")
+    extracted = app.extract_example_sentence(text, "cooperate")
+    assert app.usable_wiktionary_example(extracted, "cooperate")

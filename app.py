@@ -2028,13 +2028,52 @@ def clean_wiktionary_example_text(text: str) -> str:
     return cleaned
 
 
+def extract_example_sentence(text: str, word: str) -> str:
+    """Pick the single best sentence containing the target word.
+
+    Wiktionary quotations are often multi-sentence passages (well over the
+    usable length limit) where only one sentence actually uses the target word,
+    e.g. common nouns like "shortage" whose only examples are long book/news
+    quotes. Returning that one sentence keeps such words from having no example
+    at all. If the whole text is already a single short sentence, it is returned
+    unchanged.
+    """
+    cleaned = clean_wiktionary_example_text(text)
+    if not cleaned:
+        return ""
+
+    pattern = cloze_match_pattern(word)
+    if pattern is None:
+        return cleaned
+
+    # Split into sentences on ., !, ? followed by whitespace. A perfect
+    # tokenizer is unnecessary for choosing a cloze sentence.
+    parts = re.split(r"(?<=[.!?])\s+", cleaned)
+    if len(parts) <= 1:
+        return cleaned
+
+    matching = [part.strip() for part in parts if pattern.search(part)]
+    if not matching:
+        # Target word only appears across a sentence boundary; leave the full
+        # text so the caller's usability check can decide.
+        return cleaned
+
+    # Prefer the shortest matching sentence that is long enough to be a real
+    # example, so the cloze prompt stays focused.
+    matching.sort(key=len)
+    for candidate in matching:
+        if len(candidate) >= 6:
+            return candidate
+    return matching[0]
+
+
 def usable_wiktionary_example(sentence: str, word: str) -> bool:
     stripped = clean_wiktionary_example_text(sentence)
     if not stripped or not valid_example_sentence(stripped, word):
         return False
     if contains_blocked_example_word(stripped):
         return False
-    if len(stripped) < 6 or len(stripped) > 180:
+    if len(stripped) < 6 or len(stripped) > 240:
         return False
     if re.search(r"https?://|www\.|[@#]|→|<|>|[_{}\[\]]", stripped):
         return False
@@ -3156,7 +3195,7 @@ def ensure_wiktionary_lookup_index(target_words: set[str] | None = None) -> None
                 for example in examples:
                     if not isinstance(example, dict):
                         continue
-                    sentence = clean_wiktionary_example_text(str(example.get("text") or ""))
+                    sentence = extract_example_sentence(str(example.get("text") or ""), word_key)
                     if not usable_wiktionary_example(sentence, word_key):
                         continue
                     key = (word_key, part_group, sentence)
