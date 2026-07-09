@@ -1293,7 +1293,70 @@ def next_review_date(stage: int) -> str:
     return (datetime.now().date() + timedelta(days=REVIEW_INTERVAL_DAYS[index])).isoformat()
 
 
+def spelling_variants(word: str) -> set[str]:
+    """Return British/American spelling variants of a word (including itself).
+
+    Wiktionary often keeps example sentences under only one spelling (e.g. all
+    examples live under "judgment", while the "judgement" entry is an empty
+    cross-reference). Generating both spellings lets example lookup find them
+    and lets cloze practice accept either spelling as correct.
+    """
+    base = word.strip().lower()
+    if not base or not re.fullmatch(r"[a-z]+", base):
+        return {base} if base else set()
+
+    variants = {base}
+
+    # Rule-based transforms that hold across many common words. Applied in both
+    # directions so either spelling maps to the other.
+    rules = [
+        # -our / -or : colour/color, honour/honor, favour/favor, behaviour...
+        (r"our\b", "or"),
+        (r"or\b", "our"),
+        # -ise / -ize and -isation / -ization : organise/organize...
+        (r"is(e|ed|es|ing|ation)\b", r"iz\1"),
+        (r"iz(e|ed|es|ing|ation)\b", r"is\1"),
+        # -yse / -yze : analyse/analyze, paralyse/paralyze
+        (r"yse\b", "yze"),
+        (r"yze\b", "yse"),
+        # -re / -er : centre/center, theatre/theater, metre/meter, fibre...
+        (r"([bcdfgtv])re\b", r"\1er"),
+        (r"([bcdfgt])er\b", r"\1re"),
+        # -ce / -se noun forms : defence/defense, offence/offense, licence...
+        (r"ence\b", "ense"),
+        (r"ense\b", "ence"),
+        # judgement / judgment, acknowledgement / acknowledgment, ageing/aging
+        (r"dgement\b", "dgment"),
+        (r"dgment\b", "dgement"),
+        (r"ageing\b", "aging"),
+        (r"aging\b", "ageing"),
+        # doubled-l before suffix : travelled/traveled, cancelled/canceled...
+        (r"ll(ed|ing|er|or)\b", r"l\1"),
+        # -ogue / -og : catalogue/catalog, dialogue/dialog
+        (r"ogue\b", "og"),
+        (r"og\b", "ogue"),
+    ]
+    for pattern, repl in rules:
+        for existing in list(variants):
+            transformed = re.sub(pattern, repl, existing)
+            if transformed != existing and re.fullmatch(r"[a-z]+", transformed):
+                variants.add(transformed)
+
+    return variants
+
+
 def cloze_forms(word: str) -> set[str]:
+    base = word.strip().lower()
+    if not base or not re.fullmatch(r"[a-z]+", base):
+        return {base} if base else set()
+
+    forms = set()
+    for variant in spelling_variants(base):
+        forms |= cloze_inflections(variant)
+    return {form for form in forms if form}
+
+
+def cloze_inflections(word: str) -> set[str]:
     base = word.strip().lower()
     if not base or not re.fullmatch(r"[a-z]+", base):
         return {base} if base else set()
@@ -3223,18 +3286,22 @@ def ensure_wiktionary_lookup_index(target_words: set[str] | None = None) -> None
 def ranked_wiktionary_example_candidates(word: str, part_of_speech: str, limit: int = 8) -> list[sqlite3.Row]:
     if not word.strip() or not wiktionary_jsonl_path():
         return []
-    ensure_wiktionary_lookup_index({word.strip().lower()})
+    # Index (and later query) every British/American spelling so a word stored
+    # under one spelling still finds examples filed under the other.
+    word_keys = sorted(spelling_variants(word))
+    ensure_wiktionary_lookup_index(set(word_keys))
     lookup_groups = wiktionary_lookup_groups(part_of_speech, word)
-    placeholders = ",".join("?" for _ in lookup_groups)
+    group_placeholders = ",".join("?" for _ in lookup_groups)
+    key_placeholders = ",".join("?" for _ in word_keys)
     rows = get_db().execute(
         f"""
         SELECT example_sentence, definition, example_type, sense_tags, part_group
         FROM wiktionary_examples
-        WHERE word_key = ? AND part_group IN ({placeholders})
+        WHERE word_key IN ({key_placeholders}) AND part_group IN ({group_placeholders})
         ORDER BY example_rank ASC, sense_rank ASC, length(example_sentence) ASC
         LIMIT 80
         """,
-        (word.strip().lower(), *lookup_groups),
+        (*word_keys, *lookup_groups),
     ).fetchall()
     requested_group = normalize_part_group(part_of_speech)
     usable_rows: list[tuple[sqlite3.Row, set[str]]] = []
@@ -3294,18 +3361,20 @@ def lookup_wiktionary_example(word: str, part_of_speech: str) -> sqlite3.Row | N
 def lookup_wiktionary_definition(word: str, part_of_speech: str) -> str | None:
     if not word.strip() or not wiktionary_jsonl_path():
         return None
-    ensure_wiktionary_lookup_index({word.strip().lower()})
+    word_keys = sorted(spelling_variants(word))
+    ensure_wiktionary_lookup_index(set(word_keys))
     lookup_groups = wiktionary_lookup_groups(part_of_speech, word)
-    placeholders = ",".join("?" for _ in lookup_groups)
+    group_placeholders = ",".join("?" for _ in lookup_groups)
+    key_placeholders = ",".join("?" for _ in word_keys)
     rows = get_db().execute(
         f"""
         SELECT definition, sense_tags, part_group, sense_rank
         FROM wiktionary_definitions
-        WHERE word_key = ? AND part_group IN ({placeholders})
+        WHERE word_key IN ({key_placeholders}) AND part_group IN ({group_placeholders})
         ORDER BY sense_rank ASC, length(definition) ASC
         LIMIT 12
         """,
-        (word.strip().lower(), *lookup_groups),
+        (*word_keys, *lookup_groups),
     ).fetchall()
     if not rows:
         return None

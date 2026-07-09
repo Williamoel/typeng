@@ -305,3 +305,35 @@ def test_long_single_sentence_common_word_is_usable():
             "coming year, versus those who thought otherwise entirely today.")
     extracted = app.extract_example_sentence(text, "cooperate")
     assert app.usable_wiktionary_example(extracted, "cooperate")
+
+
+# --- spelling_variants (regression: British/American spelling) -------------
+
+def test_spelling_variants_bidirectional():
+    assert app.spelling_variants("judgement") == {"judgement", "judgment"}
+    assert app.spelling_variants("judgment") == {"judgement", "judgment"}
+    assert app.spelling_variants("colour") == {"colour", "color"}
+    assert app.spelling_variants("color") == {"colour", "color"}
+
+
+def test_spelling_variants_common_rules():
+    assert "organize" in app.spelling_variants("organise")
+    assert "centre" in app.spelling_variants("center")
+    assert "defense" in app.spelling_variants("defence")
+    assert "analyze" in app.spelling_variants("analyse")
+    assert "catalog" in app.spelling_variants("catalogue")
+
+
+def test_spelling_variants_no_false_positive():
+    # A word with no variant rule applies returns just itself.
+    assert app.spelling_variants("apple") == {"apple"}
+
+
+def test_cloze_accepts_both_spellings():
+    # Both spellings (and their inflections) must be matchable for cloze.
+    forms = app.cloze_forms("judgement")
+    assert "judgement" in forms and "judgment" in forms
+    forms2 = app.cloze_forms("colour")
+    assert "colour" in forms2 and "color" in forms2
+    # inflections still generated on top of variants
+    assert "colours" in forms2 or "colors" in forms2
