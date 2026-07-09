@@ -1,0 +1,28 @@
+templates/index.html
+  s_9fa5955d877f0d::t_8ecf4822b7e034 228-231
+  s_9fa5955d877f0d::t_c2a22c2108502e 311
+static/library.js
+  s_9fa5955d877f0d::t_8b28604ee4902a 137
+  s_9fa5955d877f0d::t_0de3ee1b14d535 172-182
+static/styles.css
+  s_9fa5955d877f0d::t_ac5a0ebc866b20 951-969
+  s_9fa5955d877f0d::t_3cbf0ab1221ed3 1591
+app.py
+  s_9fa5955d877f0d::t_dc3950988f96a6 4598-4601
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c0f1a090827d3437c5846d8363e09e527679c2aa",
+  "prompts": {},
+  "sessions": {
+    "s_9fa5955d877f0d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1f25d526-a981-4c2d-942c-6bc284221752",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "williamoel <2797915706@qq.com>"
+    }
+  }
+}
