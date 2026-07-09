@@ -1,0 +1,37 @@
+resources/README.md
+  s_9fa5955d877f0d::t_f9cbe874d5a9e6 3-7,26-27,30,34,36-97
+.github/workflows/release.yml
+  s_9fa5955d877f0d::t_021bd52235e6bf 78-81
+docs/build_pdf.py
+  s_9fa5955d877f0d::t_33b762afc27b04 1-70,74-76,78,81-87,90-93,95,98-99,101,103,107-121,123-218,224-242
+  s_9fa5955d877f0d::t_f5b29f83893bb8 100,102,104-106
+  s_9fa5955d877f0d::t_c72fe472f709a7 122
+  s_9fa5955d877f0d::t_fef31cb7079d0a 219-223
+  s_9fa5955d877f0d::t_8846e24abf13e6 96
+  s_9fa5955d877f0d::t_2904fa5a51ffb6 71-73,77,79-80,88-89,94,97
+PACKAGING.md
+  s_9fa5955d877f0d::t_618dca54b6e9bc 35,41-45
+  s_9fa5955d877f0d::t_182da48073bfe3 148,154-157
+  s_9fa5955d877f0d::t_d0fabcade77d6d 46
+  s_9fa5955d877f0d::t_547ff56fa69cf2 158
+docs/dictionary_setup.zh-CN.md
+  s_9fa5955d877f0d::t_46461c6d006892 1-140
+SOURCES.md
+  s_9fa5955d877f0d::t_a0f3cd4b57bc25 3-7,30-101
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a25d1d9e7a71cb8676c908873151f546b43edbbc",
+  "prompts": {},
+  "sessions": {
+    "s_9fa5955d877f0d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1f25d526-a981-4c2d-942c-6bc284221752",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "williamoel <2797915706@qq.com>"
+    }
+  }
+}
