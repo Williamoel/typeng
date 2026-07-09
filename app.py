@@ -2135,11 +2135,17 @@ def fill_examples_from_dictionaries(
                 definitions[int(row["id"])] = definition
 
         if mode == "refresh":
+            # Refresh replaces the current example with a different candidate.
             lookup = refresh_example_candidate(word, part_of_speech, row["example_sentence"], top_n=8)
             if lookup:
                 matches[int(row["id"])] = (lookup["example_sentence"], lookup["definition"])
             continue
 
+        # Fill (best) only fills entries that have no example yet. A word that
+        # already has an example — whether the user typed it or a previous fill
+        # added it — is left untouched, so hand-written examples are never lost.
+        if str(row["example_sentence"] or "").strip():
+            continue
         lookup = lookup_wiktionary_example(word, part_of_speech)
         if lookup:
             matches[int(row["id"])] = (lookup["example_sentence"], lookup["definition"])
@@ -2148,23 +2154,8 @@ def fill_examples_from_dictionaries(
         if lookup:
             matches[int(row["id"])] = (lookup["example_sentence"], lookup["definition"])
 
-    missing_ids = sorted({int(row["id"]) for row in rows} - set(matches))
-    if mode != "refresh":
-        for batch_start in range(0, len(missing_ids), 500):
-            batch = missing_ids[batch_start : batch_start + 500]
-            placeholders = ",".join("?" for _ in batch)
-            get_db().execute(
-                f"""
-                UPDATE words
-                SET example_sentence = NULL,
-                    example_translation = NULL,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE library_id = ?
-                  AND id IN ({placeholders})
-                """,
-                [get_active_library_id(), *batch],
-            )
-
+    # Neither mode clears existing content: fill only adds where empty, and
+    # refresh only replaces entries that found a new candidate.
     for word_id, (sentence, example_definition) in matches.items():
         definition = definitions.get(word_id) or example_definition
         get_db().execute(
@@ -3908,10 +3899,14 @@ def fill_auto_examples():
     )
     if checked == 0:
         flash(f"No words found in range {start}-{end}.", "success")
-    else:
-        action = "refreshed from top-8 suitable candidates" if mode == "refresh" else "filled with the best candidates"
+    elif mode == "refresh":
         flash(
-            f"Auto examples {action}: updated {matched} example sentences after checking {checked} words in range {start}-{end}.",
+            f"Refreshed {matched} example sentences (from top-8 candidates) after checking {checked} words in range {start}-{end}.",
+            "success",
+        )
+    else:
+        flash(
+            f"Filled {matched} entries that had no example (existing examples were kept) after checking {checked} words in range {start}-{end}.",
             "success",
         )
     return redirect(url_for("index", edit=1))
