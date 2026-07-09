@@ -23,8 +23,13 @@ SERVER_READY_TIMEOUT_SECONDS = 30.0
 
 
 def app_home() -> Path:
+    """Resolve the data home. In packaged mode, defer to app.py's platform-aware
+    logic (which uses APPDATA/Library/XDG). In dev mode, use the source tree."""
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
+        # Import app module to reuse its resolve_app_home() which handles
+        # platform dirs and auto-migration. We can't import at top level
+        # because the launcher must set up paths before importing app.
+        pass  # Will be resolved after app import below.
     return Path(__file__).resolve().parent
 
 
@@ -62,24 +67,30 @@ def open_browser_when_ready(url: str) -> None:
 def main() -> None:
     home = app_home()
     os.environ.setdefault("TYPENG_HOME", str(home))
-    (home / "data").mkdir(parents=True, exist_ok=True)
+
+    from app import app, APP_HOME, DATA_DIR  # noqa: E402
+
+    # In packaged mode, app.py's resolve_app_home() determines the real data
+    # location (platform-standard dir with auto-migration). Use that.
+    if getattr(sys, "frozen", False):
+        home = APP_HOME
+
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     (home / "resources" / "wordnet").mkdir(parents=True, exist_ok=True)
     (home / "resources" / "wiktionary").mkdir(parents=True, exist_ok=True)
-
-    from app import app  # noqa: E402
 
     port = pick_port()
     url = f"http://{HOST}:{port}/"
 
     print("TypEng is starting...")
-    print(f"Data folder: {home / 'data'}")
+    print(f"Data folder: {DATA_DIR}")
     print(f"Open this address if the browser does not open automatically: {url}")
     print("Close this window or press Ctrl+C to stop TypEng.")
 
     # Record the chosen URL so tooling (and users) can find the app even when
     # port 5000 was taken and we fell back to another port.
     try:
-        (home / "data" / "server_url.txt").write_text(url, encoding="utf-8")
+        (DATA_DIR / "server_url.txt").write_text(url, encoding="utf-8")
     except OSError:
         pass
 

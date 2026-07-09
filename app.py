@@ -32,18 +32,107 @@ def resolve_bundle_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
+def _platform_data_dir() -> Path:
+    """Return the platform-standard application data directory for TypEng.
+
+    - Windows: %APPDATA%\\TypEng  (e.g. C:\\Users\\<name>\\AppData\\Roaming\\TypEng)
+    - macOS:   ~/Library/Application Support/TypEng
+    - Linux:   $XDG_DATA_HOME/TypEng  (defaults to ~/.local/share/TypEng)
+    """
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA", "")
+        if base:
+            return Path(base) / "TypEng"
+        return Path.home() / "AppData" / "Roaming" / "TypEng"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "TypEng"
+    # Linux / other Unix
+    xdg = os.environ.get("XDG_DATA_HOME", "")
+    if xdg:
+        return Path(xdg) / "TypEng"
+    return Path.home() / ".local" / "share" / "TypEng"
+
+
+def _migrate_legacy_data(new_data_dir: Path, exe_dir: Path) -> None:
+    """Auto-migrate data from the old layout (data/ beside the exe) to the new
+    platform-standard location. Runs once on first startup after upgrading.
+
+    Only migrates if:
+    - The new data dir does NOT already have a typeng.db (fresh install in new location)
+    - The old exe-adjacent data/ directory DOES have a typeng.db (user had data)
+    """
+    import shutil
+
+    new_db = new_data_dir / "typeng.db"
+    if new_db.exists():
+        return  # New location already has data, nothing to do.
+
+    old_data_dir = exe_dir / "data"
+    old_db = old_data_dir / "typeng.db"
+    if not old_db.exists():
+        return  # No legacy data to migrate.
+
+    # Copy the entire data/ contents to the new location.
+    new_data_dir.mkdir(parents=True, exist_ok=True)
+    for item in old_data_dir.iterdir():
+        dest = new_data_dir / item.name
+        if dest.exists():
+            continue
+        if item.is_dir():
+            shutil.copytree(item, dest)
+        else:
+            shutil.copy2(item, dest)
+
+    # Leave a marker so the user knows where data went.
+    notice = old_data_dir / "DATA_MOVED.txt"
+    if not notice.exists():
+        try:
+            notice.write_text(
+                f"Your TypEng data has been moved to:\n{new_data_dir}\n\n"
+                f"This folder is no longer used. You can safely delete it.\n",
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
+
+
 def resolve_app_home() -> Path:
-    """Directory for user-visible, writable app files such as data/ and resources/."""
+    """Directory for user-visible, writable app files such as data/ and resources/.
+
+    Priority:
+    1. TYPENG_HOME environment variable (for testing / advanced users).
+    2. Platform-standard data directory (APPDATA / Library / XDG_DATA_HOME).
+       This ensures data persists across version upgrades even if the user
+       extracts a new release to a different folder.
+    3. (dev mode only) Source tree directory, for convenience.
+    """
     env_home = os.environ.get("TYPENG_HOME", "").strip()
     if env_home:
         return Path(env_home).resolve()
+
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
+        # Packaged mode: use platform-standard directory and migrate old data.
+        home = _platform_data_dir()
+        home.mkdir(parents=True, exist_ok=True)
+        exe_dir = Path(sys.executable).resolve().parent
+        _migrate_legacy_data(home / "data", exe_dir)
+        return home
+
+    # Development mode: use source tree (same as before).
     return Path(__file__).resolve().parent
 
 
 def resolve_resource_dir() -> Path:
-    """Prefer external resources/ so users can drop large dictionary files beside the app."""
+    """Prefer external resources/ so users can drop large dictionary files beside the app.
+
+    In packaged mode the exe-adjacent resources/ is checked first (so users can
+    still drop dictionary files next to the app), then the platform data dir,
+    then the bundled read-only resources inside the PyInstaller archive.
+    """
+    if getattr(sys, "frozen", False):
+        exe_adjacent = Path(sys.executable).resolve().parent / "resources"
+        if exe_adjacent.exists():
+            return exe_adjacent
     external = APP_HOME / "resources"
     if external.exists():
         return external
