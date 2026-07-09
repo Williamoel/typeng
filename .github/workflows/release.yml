@@ -19,12 +19,13 @@ jobs:
             platform_name: windows-x64
           - os: macos-latest
             platform_name: macos-arm64
-          - os: macos-13
+          - os: macos-15-intel
             platform_name: macos-x64
           - os: ubuntu-latest
             platform_name: linux-x64
 
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
 
     steps:
       - name: Check out source
@@ -125,7 +126,10 @@ jobs:
 
   release:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Publish whatever platforms succeeded even if one runner failed or was
+    # unavailable, as long as the build job was not cancelled and at least one
+    # artifact exists. `always()` lets this run despite a failed matrix leg.
+    if: always() && startsWith(github.ref, 'refs/tags/v') && needs.build.result != 'cancelled'
     runs-on: ubuntu-latest
     steps:
       - name: Download all build artifacts
