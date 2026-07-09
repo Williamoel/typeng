@@ -104,12 +104,13 @@ jobs:
           else
             EXE="dist/typeng/typeng"
           fi
+          # Force data into a known location so we can reliably find
+          # server_url.txt — the app now uses platform-standard dirs by
+          # default, which would scatter data across the runner's home.
+          export TYPENG_HOME="dist/typeng"
           "$EXE" &
           APP_PID=$!
           URL=""
-          # The launcher falls back to a random port if 5000 is taken (common on
-          # macOS, where AirPlay Receiver binds 5000), and writes the real URL to
-          # data/server_url.txt. Read it instead of assuming port 5000.
           for i in $(seq 1 30); do
             if [ -z "$URL" ] && [ -f dist/typeng/data/server_url.txt ]; then
               URL="$(cat dist/typeng/data/server_url.txt)"
