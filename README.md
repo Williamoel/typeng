@@ -1,60 +1,147 @@
-# typeng
+<div align="center">
 
-中文用户可选择[中文版README](README.zh-CN.md)进行查看。
+# ⌨️ typeng
 
-typeng is a local-first English vocabulary typing and memorization tool built with Python, Flask, SQLite, and a local web interface.
+**Type it. Don't just recognize it.**
 
-It is designed for English learners who want to memorize words through active typing and contextual understanding. typeng helps users build muscle memory for spelling by typing words on a keyboard, provides examples that are as complete as possible for users to fill in and use to understand context and usage, and offers review plans based on each user's personal choices.
+A local-first English vocabulary trainer that builds real spelling muscle memory
+through keyboard typing and in-context cloze practice.
 
-## Some typeng design examples
+<a href="https://github.com/Williamoel/typeng/releases/latest"><img src="https://img.shields.io/github/v/release/Williamoel/typeng?color=4c9a2a&label=release" alt="Latest release"></a>
+<img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-0a7bbb" alt="Platforms">
+<img src="https://img.shields.io/badge/python-3.12-3776ab" alt="Python 3.12">
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License"></a>
+<img src="https://img.shields.io/badge/data-100%25%20local-e67e22" alt="Local-first">
+
+**English** · [中文](README.zh-CN.md)
+
+### [⬇️ Download the latest release](https://github.com/Williamoel/typeng/releases/latest)
+
+Windows · macOS · Linux — download, unzip, double-click. No Python, no setup.
+
+<br>
 
 ![Typing words](./images/typing_word.png)
 
-typeng's regular practice can show Chinese meanings, parts of speech, phonetics, UK/US pronunciation, and English definitions at the same time. The same word is split into more detailed entries by part of speech, so users can learn the meanings and usage of each part of speech separately. English definitions for the matching part of speech are especially useful for more advanced learners, because they help users move beyond Chinese meanings and understand the word's context more directly.
-
-If a user misspells a word, typeng immediately shows the correct spelling. After the current group of new words ends, typeng asks the user to practice the missed words again until every word in the group has been spelled correctly once. Users can then decide which missed words should enter the wrong-word book for later review.
-
-![Mode choices](./images/mode_choice.png)
-
-typeng tries to leave the learning rhythm to the user. Users can choose how many entries to study next, and freely combine Chinese prompts, English definitions, phonetics, automatic pronunciation, and cloze practice.
-
-Cloze is the most important difference in typeng. Many tools only let users quickly glance at example sentences, so learning often stays at the level of recognition. typeng removes the target word or its inflected form from an example sentence and asks the user to spell it in context. `With cloze` adds a round of contextual practice after regular spelling, while `Only in cloze` focuses on contextual practice and falls back to regular spelling for entries without examples.
-
-![Context practice](./images/filling_cloze.png)
-
-In cloze practice, users do not recall words from isolated meanings. They complete the target word or one of its forms inside a real sentence, which trains spelling, collocation, and word forms in a way that is closer to actual use.
-
-![Import and exclusion](./images/import_and_exclude.png)
-
-To help users build their own libraries, typeng supports TXT/CSV import according to the `Format Guide`, and it can exclude overlapping entries between local libraries. For example, if a user has already learned CET-level basic words, they can remove overlapping entries from a higher-level library such as TOEFL and avoid unnecessary repetition. The editing interface also supports batch deletion for larger cleanup work.
-
-![Automatic filling](./images/auto_filling.png)
-
-Many users may only want to provide the words first, so typeng provides automatic filling. Users can ask the system to match example sentences by part of speech within a selected range. `Fill examples` chooses the highest-scoring example, while `Refresh examples` randomly replaces examples in the same range from the top 8 suitable candidates. Users can also use `Preview cleanup` to check entries that still do not have reliable examples before deciding whether to keep them.
-
-When a manually added word has no Chinese meaning, typeng tries to fill it from the local dictionary by matching the part of speech. If the user only enters the word, typeng can also split it into multiple entries according to the parts of speech found in the dictionary.
-
-![Review settings](./images/review_choice.png)
-
-Each library has independent study, wrong-word, and spaced-review states. typeng gives review suggestions according to when each word was learned and the Ebbinghaus forgetting curve, while users can still adjust how many words to review this time and how many successful review rounds a word needs before reminders stop.
+</div>
 
 ## Why typeng
 
-The starting point of this open-source project is that I have never found a tool that really lets me memorize vocabulary efficiently. Many mainstream vocabulary tools are more about "recognizing a word" or "choosing a meaning". These exercises can help users become familiar with meanings, but sometimes they cannot guarantee that users can really spell the word, and they do not necessarily help users put the word back into context.
+Most vocabulary tools ask you to *recognize* a word or *pick* a meaning. That helps
+you get familiar with meanings, but it doesn't prove you can actually spell the word,
+and it rarely puts the word back into a real sentence.
 
-Since primary school, I have used a program called Dr.eye, which helps memorize words by typing on a keyboard. But it only lets users provide words and Chinese meanings, and it does not provide context. Later, I also encountered software with contextual spelling, but typing on a phone did not work very well, and the available word libraries were very small. So I wanted this application to focus only on desktop users. I hope the muscle memory built through keyboard typing can help users remember and understand words more deeply.
+typeng makes you **type the answer** and **understand why the word fits the sentence**.
+It breaks vocabulary learning into concrete actions: recall spelling from a Chinese
+meaning or definition, type the word after hearing it, complete the word inside a real
+cloze sentence, and consolidate it through wrong-word and spaced review.
 
-typeng emphasizes making users actually type the answer and understand why the word can be used in a sentence. It breaks vocabulary learning into several more concrete actions: recalling spelling from Chinese or definitions, typing the word after hearing pronunciation, understanding usage through cloze examples, and repeatedly consolidating words through wrong-word review and learned-word review.
+Everything runs on your own machine — no account, no cloud, no telemetry. Use the
+preset exam libraries, or import words from your classes, notebooks, and reading, and
+write the example sentences you truly want to remember.
 
-Compared with tools that only provide fixed word lists, typeng hopes to become the user's own vocabulary training desk. You can directly use preset exam libraries, or import words collected from classes, vocabulary notebooks, and reading materials. You can manually write the example sentences you truly want to remember, or let the system first fill a reference context automatically and then continue editing it.
+## Highlights
 
-At the moment, this project stays local-first:
+<table>
+<tr>
+<td width="50%">
 
-- no account system
-- no cloud sync
-- local SQLite database
-- runs on the user's own computer
-- can use local dictionary resources to generate preset libraries, English definitions, and example sentences
+### ⌨️ Type, don't guess
+Recall spelling from meaning, definition, or audio, then type it out. Muscle memory,
+not multiple choice.
+
+</td>
+<td width="50%">
+
+### 📝 Cloze in context
+The signature feature. Fill the word — or its correct inflected form — into a real
+example sentence to train spelling, collocation, and word forms together.
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+### 📚 Your own libraries
+Import TXT/CSV, split entries by part of speech, and exclude words you already know
+from higher-level libraries to skip needless repetition.
+
+</td>
+<td width="50%">
+
+### 🔁 Wrong-word + spaced review
+An error notebook plus Ebbinghaus-inspired spaced review, with review targets you set
+per library.
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+### 🔊 Optional pronunciation
+US/UK audio via Youdao, with a browser speech-synthesis fallback. Turn it off to stay
+fully offline.
+
+</td>
+<td width="50%">
+
+### 🔒 100% local
+Your libraries, progress, and database never leave your computer. No account, no sync,
+no tracking.
+
+</td>
+</tr>
+</table>
+
+## How typeng works
+
+**Rich practice cards.** Regular practice can show the Chinese meaning, part of speech,
+phonetics, UK/US pronunciation, and English definition together. The same word is split
+into separate entries per part of speech, so you learn each usage on its own — and the
+POS-matched English definition helps advanced learners move beyond the Chinese meaning.
+Misspell a word and typeng shows the correct spelling immediately; after each group, it
+re-runs the words you missed until every one is spelled correctly once.
+
+![Mode choices](./images/mode_choice.png)
+
+**You set the rhythm.** Choose how many entries to study next, and freely combine Chinese
+prompts, English definitions, phonetics, automatic pronunciation, and cloze practice.
+`With cloze` adds a contextual round after regular spelling; `Only in cloze` focuses on
+context and falls back to normal spelling for entries without examples.
+
+![Context practice](./images/filling_cloze.png)
+
+**Cloze is the difference.** Instead of recalling a word from an isolated meaning, you
+complete the target word or one of its forms inside a real sentence — training spelling,
+collocation, and word forms in a way that's much closer to actual use.
+
+![Import and exclusion](./images/import_and_exclude.png)
+
+**Build libraries your way.** Import TXT/CSV per the format guide, and exclude overlapping
+entries between libraries — for example, drop CET words you already know from a TOEFL list.
+The editor also supports batch deletion for larger cleanups.
+
+![Automatic filling](./images/auto_filling.png)
+
+**Let typeng do the busywork.** Give it just the words and it can auto-match example
+sentences by part of speech. `Fill examples` picks the best-scoring sentence; `Refresh
+examples` swaps in another from the top candidates; `Preview cleanup` flags entries that
+still lack a reliable example. Missing Chinese meanings are filled from the local
+dictionary by matching part of speech, and a bare word can be split into multiple entries
+by its parts of speech.
+
+![Review settings](./images/review_choice.png)
+
+**Review that adapts.** Each library keeps independent study, wrong-word, and spaced-review
+state. typeng suggests reviews based on when each word was learned and the Ebbinghaus
+forgetting curve, and you still control how many words to review and how many successful
+rounds retire a word.
+
+## The story behind typeng
+
+Since primary school I've used a program called Dr.eye, which helps you memorize words by typing them on a keyboard. It worked, but it only takes words and Chinese meanings — no context. Later I tried software with contextual spelling, but typing on a phone felt wrong and the word libraries were tiny. I wanted a tool that focused on desktop typing, where the muscle memory built through the keyboard could help me remember and *understand* words more deeply.
+
+So typeng is the tool I always wanted: use preset exam libraries directly, or import words from your classes, notebooks, and reading. Write the example sentences you truly want to remember, or let typeng fill a reference context automatically and keep editing from there. It aims to be your own vocabulary training desk rather than another fixed word list.
 
 ## Feature Details
 
@@ -163,31 +250,6 @@ you prefer to stay fully offline, turn off automatic pronunciation in the
 practice options; typeng then falls back to the browser's built-in speech
 synthesis, which does not make network requests.
 
-## Run Locally
-
-The current version is mainly for development and testing. Run it as follows:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python app.py
-```
-
-Then open:
-
-```text
-http://127.0.0.1:5000
-```
-
-This is a local Flask web application. Opening `127.0.0.1` does not require a VPN or an internet connection.
-
-To test the desktop-style launcher, you can also run:
-
-```bash
-python run_typeng.py
-```
-
 ## Download and Run
 
 typeng ships as a self-contained local zip for each platform. You do not need
@@ -202,7 +264,7 @@ Get the latest packages from the releases page:
 
 ### Windows
 
-1. Download `typeng-<version>-windows-x64.zip`.
+1. Download `typeng-v0.1.0-windows-x64.zip`.
 2. Extract the whole folder.
 3. Double-click `typeng.exe`.
 4. The first time, Windows SmartScreen may warn about an unrecognized app
@@ -210,8 +272,8 @@ Get the latest packages from the releases page:
 
 ### macOS
 
-1. Download `typeng-<version>-macos-arm64.zip` (Apple Silicon: M1/M2/M3) or
-   `typeng-<version>-macos-x64.zip` (Intel).
+1. Download `typeng-v0.1.0-macos-arm64.zip` (Apple Silicon: M1/M2/M3) or
+   `typeng-v0.1.0-macos-x64.zip` (Intel).
 2. Extract the folder, then run `typeng` inside it.
 3. Because the app is unsigned, macOS Gatekeeper may block it on first launch.
    Right-click `typeng` and choose **Open**, or run once in Terminal:
@@ -222,7 +284,7 @@ Get the latest packages from the releases page:
 
 ### Linux
 
-1. Download `typeng-<version>-linux-x64.zip`.
+1. Download `typeng-v0.1.0-linux-x64.zip`.
 2. Extract the folder, then run `./typeng` inside it.
 
 ### Optional dictionary resources
@@ -235,6 +297,20 @@ in [resources/README.md](resources/README.md) and [SOURCES.md](SOURCES.md).
 
 Maintainers who want to build the packages themselves can follow
 [PACKAGING.md](PACKAGING.md).
+
+## Run from source (for developers)
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python app.py
+```
+
+Then open `http://127.0.0.1:5000`. This is a local Flask app — `127.0.0.1`
+does not require a VPN or internet connection.
+
+To test the desktop-style launcher: `python run_typeng.py`
 
 ## Import Format
 
