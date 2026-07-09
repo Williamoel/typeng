@@ -1095,6 +1095,22 @@ a.save-done-button {
   margin-right: auto;
 }
 
+.keep-first-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 750;
+  color: var(--muted);
+}
+
+.keep-first-control input[type="number"] {
+  width: 72px;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
 .table-row {
   display: grid;
   grid-template-columns: minmax(120px, 1.1fr) minmax(90px, 0.7fr) minmax(220px, 2fr) minmax(90px, 0.7fr);

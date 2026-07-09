@@ -308,7 +308,11 @@
             <input type="checkbox" data-select-all-words>
             Select this page
           </label>
-          <button type="button" class="secondary tiny" data-invert-selection>Invert selection</button>
+          <span class="keep-first-control">
+            Keep first
+            <input type="number" min="0" step="1" placeholder="0" data-keep-first-count aria-label="Number of words to keep from the top">
+            <button type="button" class="secondary tiny" data-keep-first-apply>Select the rest</button>
+          </span>
           <span data-selected-count>0 selected</span>
           <button type="submit" class="danger tiny" disabled data-bulk-delete-button>Delete selected</button>
         </div>

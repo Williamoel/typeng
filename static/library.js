@@ -134,7 +134,8 @@
 
     const checkboxes = Array.from(document.querySelectorAll("[data-word-select]"));
     const selectAll = document.querySelector("[data-select-all-words]");
-    const invertButton = document.querySelector("[data-invert-selection]");
+    const keepFirstInput = document.querySelector("[data-keep-first-count]");
+    const keepFirstApply = document.querySelector("[data-keep-first-apply]");
     const countLabel = document.querySelector("[data-selected-count]");
     const deleteButton = document.querySelector("[data-bulk-delete-button]");
 
@@ -169,14 +170,25 @@
       });
     }
 
-    if (invertButton) {
-      // Flip every checkbox: check the 5 words you want to keep, click Invert,
-      // and the other 95 become selected for deletion in one step.
-      invertButton.addEventListener("click", () => {
-        checkboxes.forEach((checkbox) => {
-          checkbox.checked = !checkbox.checked;
+    if (keepFirstApply && keepFirstInput) {
+      // "Keep first N": leave the first N words (in table order) unchecked and
+      // select every word after them. The words a user wants to keep are
+      // usually clustered at the top, so they set N once and then just uncheck
+      // the handful of later words they also want to keep.
+      const applyKeepFirst = () => {
+        const raw = parseInt(keepFirstInput.value, 10);
+        const keep = Number.isNaN(raw) ? 0 : Math.max(0, Math.min(raw, checkboxes.length));
+        checkboxes.forEach((checkbox, index) => {
+          checkbox.checked = index >= keep;
         });
         updateState();
+      };
+      keepFirstApply.addEventListener("click", applyKeepFirst);
+      keepFirstInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          applyKeepFirst();
+        }
       });
     }
 
