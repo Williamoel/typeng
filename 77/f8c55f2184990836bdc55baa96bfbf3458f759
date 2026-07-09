@@ -1,0 +1,24 @@
+static/library.js
+  s_9fa5955d877f0d::t_74c589359cf259 137-138
+  s_9fa5955d877f0d::t_5592276cd6572f 173-182,185-191
+templates/index.html
+  s_9fa5955d877f0d::t_ec650fd3d04943 311-315
+static/styles.css
+  s_9fa5955d877f0d::t_e6616f6d8368b6 1098-1113
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "77f8c55f2184990836bdc55baa96bfbf3458f759",
+  "prompts": {},
+  "sessions": {
+    "s_9fa5955d877f0d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1f25d526-a981-4c2d-942c-6bc284221752",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "williamoel <2797915706@qq.com>"
+    }
+  }
+}
