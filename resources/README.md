@@ -45,7 +45,8 @@ resources/wiktionary/kaikki.org-dictionary-English.jsonl
 
 (It also works if placed next to the app executable.)
 
-Source / download: https://kaikki.org/dictionary/English/ ("Download JSON data for all senses")
+Source: https://kaikki.org/dictionary/English/
+Download (direct): https://kaikki.org/dictionary/English/kaikki.org-dictionary-English.jsonl
 License: Wiktionary content is CC-BY-SA 4.0; keep attribution with redistribution.
 
 ---
@@ -93,5 +94,6 @@ resources/wiktionary/kaikki.org-dictionary-English.jsonl
 
 （放在应用可执行文件同级目录也可以。）
 
-来源 / 下载：https://kaikki.org/dictionary/English/ （点击 “Download JSON data for all senses”）
+来源：https://kaikki.org/dictionary/English/
+下载（直链）：https://kaikki.org/dictionary/English/kaikki.org-dictionary-English.jsonl
 许可证：维基词典内容为 CC-BY-SA 4.0；二次分发时请保留署名。
