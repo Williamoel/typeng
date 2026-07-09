@@ -10,7 +10,7 @@ For packaged builds, put `ecdict.csv` in this directory:
 resources/ecdict.csv
 ```
 
-typeng uses this file first when a user clicks a preset library button such as CET4, CET6, IELTS, TOEFL, GRE, 高考, 中考, or 考研.
+TypEng uses this file first when a user clicks a preset library button such as CET4, CET6, IELTS, TOEFL, GRE, 高考, 中考, or 考研.
 
 Source: https://github.com/skywind3000/ECDICT
 License: MIT License, as stated by the ECDICT project.

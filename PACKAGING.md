@@ -1,19 +1,19 @@
-# Packaging typeng For Windows
+# Packaging TypEng For Windows
 
 [简体中文](#windows-打包说明)
 
-typeng now builds desktop packages automatically. Pushing a `v*` tag triggers
+TypEng now builds desktop packages automatically. Pushing a `v*` tag triggers
 [.github/workflows/release.yml](.github/workflows/release.yml), which uses
 PyInstaller to build Windows, macOS (Intel + Apple Silicon), and Linux zips on
 real runners and attaches them to a GitHub Release. End users just download,
 extract, and run:
 
 ```text
-download zip -> extract -> double-click typeng.exe (or run ./typeng) -> browser opens typeng
+download zip -> extract -> double-click typeng.exe (or run ./typeng) -> browser opens TypEng
 ```
 
 This document records the packaging workflow so you can also build locally or
-adjust the automated build. typeng remains a local Flask app internally: the
+adjust the automated build. TypEng remains a local Flask app internally: the
 executable starts the local server, waits until it is ready, and opens the
 browser at the local URL (port `5000`, or another free port if 5000 is taken).
 
@@ -70,7 +70,7 @@ After adding `run_typeng.py`, build with a directory-style bundle first:
 
 ```powershell
 pyinstaller ^
-  --name typeng ^
+  --name TypEng ^
   --onedir ^
   --add-data "templates;templates" ^
   --add-data "static;static" ^
@@ -87,7 +87,7 @@ Prefer `--onedir` for the first public release. It starts faster and makes bundl
 After building, test:
 
 ```powershell
-.\dist\typeng\typeng.exe
+.\dist\TypEng\typeng.exe
 ```
 
 The browser should open automatically. If it does not, manually open the local URL printed by the launcher.
@@ -108,20 +108,20 @@ The browser should open automatically. If it does not, manually open the local U
 
 The executable is a convenience wrapper around a local web app. It should not require WSL, a manually created virtual environment, or command-line Flask startup from the end user.
 
-For long-term polish, typeng may later use a desktop shell such as Tauri or Electron, but PyInstaller is the simplest path that matches the current Python codebase.
+For long-term polish, TypEng may later use a desktop shell such as Tauri or Electron, but PyInstaller is the simplest path that matches the current Python codebase.
 
 ---
 
 # Windows 打包说明
 
-typeng 现在会自动打包桌面版本。推送一个 `v*` 标签即可触发
+TypEng 现在会自动打包桌面版本。推送一个 `v*` 标签即可触发
 [.github/workflows/release.yml](.github/workflows/release.yml)，它使用 PyInstaller 在真实的运行环境上构建 Windows、macOS（Intel + Apple Silicon）和 Linux 压缩包，并附加到 GitHub Release。普通用户只需下载、解压、运行：
 
 ```text
-下载 zip -> 解压 -> 双击 typeng.exe（或运行 ./typeng）-> 浏览器自动打开 typeng
+下载 zip -> 解压 -> 双击 typeng.exe（或运行 ./typeng）-> 浏览器自动打开 TypEng
 ```
 
-这份文档记录打包流程，方便你在本地自行构建或调整自动构建。typeng 内部仍然是本地 Flask 应用：exe 负责启动本地服务，等待服务可用，然后自动打开浏览器（默认 `5000` 端口，被占用时自动换一个空闲端口）。
+这份文档记录打包流程，方便你在本地自行构建或调整自动构建。TypEng 内部仍然是本地 Flask 应用：exe 负责启动本地服务，等待服务可用，然后自动打开浏览器（默认 `5000` 端口，被占用时自动换一个空闲端口）。
 
 ## 目标发行目录
 
@@ -176,7 +176,7 @@ pip install pyinstaller
 
 ```powershell
 pyinstaller ^
-  --name typeng ^
+  --name TypEng ^
   --onedir ^
   --add-data "templates;templates" ^
   --add-data "static;static" ^
@@ -193,7 +193,7 @@ pyinstaller ^
 打包后测试：
 
 ```powershell
-.\dist\typeng\typeng.exe
+.\dist\TypEng\typeng.exe
 ```
 
 正常情况下浏览器会自动打开。如果没有自动打开，可以手动访问启动器打印出的本地地址。
@@ -214,4 +214,4 @@ pyinstaller ^
 
 这个 exe 本质上是本地网页应用的便捷启动器。最终用户不应该需要 WSL、手动创建虚拟环境，或者输入 Flask 启动命令。
 
-长期来看，typeng 也可以考虑 Tauri 或 Electron 这类桌面外壳；但从当前 Python 代码出发，PyInstaller 是最直接、成本最低的路径。
+长期来看，TypEng 也可以考虑 Tauri 或 Electron 这类桌面外壳；但从当前 Python 代码出发，PyInstaller 是最直接、成本最低的路径。

@@ -56,7 +56,7 @@ def open_browser_when_ready(url: str) -> None:
     if wait_until_ready(url, SERVER_READY_TIMEOUT_SECONDS):
         webbrowser.open(url)
     else:
-        print(f"typeng did not respond in time; open {url} manually.")
+        print(f"TypEng did not respond in time; open {url} manually.")
 
 
 def main() -> None:
@@ -71,10 +71,10 @@ def main() -> None:
     port = pick_port()
     url = f"http://{HOST}:{port}/"
 
-    print("typeng is starting...")
+    print("TypEng is starting...")
     print(f"Data folder: {home / 'data'}")
     print(f"Open this address if the browser does not open automatically: {url}")
-    print("Close this window or press Ctrl+C to stop typeng.")
+    print("Close this window or press Ctrl+C to stop TypEng.")
 
     # Record the chosen URL so tooling (and users) can find the app even when
     # port 5000 was taken and we fell back to another port.

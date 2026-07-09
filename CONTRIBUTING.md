@@ -1,6 +1,6 @@
-# Contributing to typeng
+# Contributing to TypEng
 
-Thanks for considering a contribution. typeng is still a student-scale local app, so small, focused pull requests are easiest to review.
+Thanks for considering a contribution. TypEng is still a student-scale local app, so small, focused pull requests are easiest to review.
 
 ## Local Setup
 
@@ -45,4 +45,4 @@ If your change affects practice flow, review scheduling, import behavior, or exa
 
 ## Data Sources
 
-typeng can use third-party dictionary resources. Those resources keep their own licenses; see [SOURCES.md](SOURCES.md) and [resources/README.md](resources/README.md).
+TypEng can use third-party dictionary resources. Those resources keep their own licenses; see [SOURCES.md](SOURCES.md) and [resources/README.md](resources/README.md).

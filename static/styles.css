@@ -487,6 +487,24 @@ h2 {
   width: 100%;
 }
 
+.preset-confirm-panel {
+  margin-bottom: 18px;
+  padding: 0 24px 24px;
+  border-left: 4px solid #e67e22;
+}
+
+.preset-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.preset-confirm-actions form {
+  margin: 0;
+}
+
 .tool-actions form {
   margin: 0;
 }

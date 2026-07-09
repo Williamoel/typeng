@@ -1,8 +1,35 @@
 {% extends "base.html" %}
 
-{% block title %}typeng - Library{% endblock %}
+{% block title %}TypEng - Library{% endblock %}
 
 {% block content %}
+{% if preset_confirm %}
+  <section class="panel preset-confirm-panel">
+    <div class="section-heading compact-heading">
+      <h2>{{ preset_confirm.name }} already exists</h2>
+    </div>
+    <p class="panel-note">
+      The <strong>{{ preset_confirm.name }}</strong> library already has
+      {{ preset_confirm.count }} words, including any edits or deletions you made.
+      What would you like to do?
+    </p>
+    <div class="preset-confirm-actions">
+      <form action="{{ url_for('create_ecdict_preset') }}" method="post">
+        <input type="hidden" name="preset_key" value="{{ preset_confirm.key }}">
+        <input type="hidden" name="confirm" value="1">
+        <button type="submit" class="tiny danger"
+          onclick="return confirm('Rebuild {{ preset_confirm.name }} from ECDICT? This discards your edits and deletions in this library.');">
+          Rebuild (discard my changes)
+        </button>
+      </form>
+      <form action="{{ url_for('create_ecdict_preset_copy') }}" method="post">
+        <input type="hidden" name="preset_key" value="{{ preset_confirm.key }}">
+        <button type="submit" class="tiny secondary">Create a separate copy</button>
+      </form>
+      <a class="secondary-button tiny-link" href="{{ url_for('index') }}">Cancel</a>
+    </div>
+  </section>
+{% endif %}
 {% if not edit_mode %}
   <section class="panel common-libraries-panel">
     <div class="section-heading compact-heading">

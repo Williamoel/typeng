@@ -76,6 +76,22 @@ jobs:
           cp resources/README.md dist/typeng/resources/README.md
           cp -r samples dist/typeng/ 2>/dev/null || true
 
+      - name: Bundle Open English WordNet for auto examples
+        shell: bash
+        run: |
+          # WordNet (CC-BY 4.0, ~10 MB) powers the auto example-sentence
+          # feature out of the box. Wiktionary is far larger and stays optional
+          # (users add it per SOURCES.md). Don't fail the release if the
+          # download is unavailable — the app degrades gracefully without it.
+          URL="https://en-word.net/static/english-wordnet-2025-json.zip"
+          DEST="dist/typeng/resources/wordnet/english-wordnet-2025-json.zip"
+          if curl -fsSL --retry 3 --retry-delay 5 -o "$DEST" "$URL"; then
+            echo "Bundled WordNet: $(ls -lh "$DEST" | awk '{print $5}')"
+          else
+            echo "::warning::Could not download WordNet; auto examples will be unavailable in this build."
+            rm -f "$DEST"
+          fi
+
       - name: Smoke test the built executable
         shell: bash
         run: |

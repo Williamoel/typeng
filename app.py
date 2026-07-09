@@ -3714,6 +3714,16 @@ def index():
         sort_mode = SORT_FREQUENCY
     words, pagination = fetch_words_page(page, LIBRARY_PAGE_SIZE, search, sort_mode)
     comparable_libraries = [library for library in fetch_libraries() if int(library["id"]) != get_active_library_id()]
+
+    # Surface a pending preset-rebuild confirmation, if one was requested.
+    preset_confirm = None
+    if request.args.get("confirm_preset") == "1" and session.get("pending_preset_key"):
+        preset_confirm = {
+            "key": session["pending_preset_key"],
+            "name": session.get("pending_preset_name", ""),
+            "count": session.get("pending_preset_count", 0),
+        }
+
     return render_template(
         "index.html",
         words=words,
@@ -3723,6 +3733,7 @@ def index():
         comparable_libraries=comparable_libraries,
         part_of_speech_options=PART_OF_SPEECH_OPTIONS,
         add_word_messages=session.pop("add_word_messages", []),
+        preset_confirm=preset_confirm,
         hide_global_stats=True,
         **base_context(),
     )
@@ -3891,8 +3902,8 @@ def import_ecdict():
         reset_ecdict_library(library_id)
         if first_library_id is None:
             first_library_id = library_id
-        inserted, updated, _skipped = import_entries(entries, library_id=library_id)
-        summaries.append(f"{library_name}: {inserted} added, {updated} updated")
+        inserted, _updated, _skipped = import_entries(entries, library_id=library_id)
+        summaries.append(f"{library_name}: {inserted} added")
 
     if first_library_id is not None:
         session["active_library_id"] = first_library_id
@@ -3902,40 +3913,108 @@ def import_ecdict():
     return redirect(url_for("index"))
 
 
-@app.post("/presets/ecdict")
-def create_ecdict_preset():
-    preset_key = request.form.get("preset_key", "").strip().lower()
+def clear_pending_preset() -> None:
+    session.pop("pending_preset_key", None)
+    session.pop("pending_preset_name", None)
+    session.pop("pending_preset_count", None)
+
+
+def load_preset_entries(preset_key: str) -> tuple[str, list[dict[str, str]] | None]:
+    """Return (library_name, entries) for a preset key, or (name, None) on error
+    after flashing an appropriate message."""
     preset = ECDICT_PRESET_LIBRARIES.get(preset_key)
     if not preset:
         flash("Choose a valid preset library.", "error")
-        return redirect(url_for("index"))
+        return "", None
 
     try:
         raw = load_ecdict_data()
-    except Exception as exc:
+    except Exception:
         flash(
             "Could not load ECDICT data. Add resources/ecdict.csv when packaging, or use Edit library -> Import ECDICT with a local ecdict.csv file.",
             "error",
         )
-        return redirect(url_for("index"))
+        return "", None
 
     grouped, errors = parse_ecdict_csv(raw, presets={preset_key: preset})
     if errors:
         flash(" ".join(errors), "error")
-        return redirect(url_for("index"))
+        return "", None
 
     library_name = str(preset["name"])
     entries = grouped.get(library_name, [])
     if not entries:
         flash(f"No words found for {library_name} in ECDICT.", "error")
+        return library_name, None
+    return library_name, entries
+
+
+def unique_library_name(base_name: str) -> str:
+    """Return base_name, or base_name (2), (3), ... if it is already taken."""
+    existing = {
+        str(row["name"])
+        for row in get_db().execute("SELECT name FROM libraries").fetchall()
+    }
+    if base_name not in existing:
+        return base_name
+    index = 2
+    while f"{base_name} ({index})" in existing:
+        index += 1
+    return f"{base_name} ({index})"
+
+
+@app.post("/presets/ecdict")
+def create_ecdict_preset():
+    preset_key = request.form.get("preset_key", "").strip().lower()
+    library_name, entries = load_preset_entries(preset_key)
+    if entries is None:
+        clear_pending_preset()
         return redirect(url_for("index"))
+
+    # If a library with this name already exists and has user content, require
+    # an explicit "confirm" flag to prevent an accidental rebuild that would
+    # wipe the user's edits and deletions.
+    existing_row = get_db().execute(
+        "SELECT id FROM libraries WHERE name = ?", (library_name,)
+    ).fetchone()
+    if existing_row and request.form.get("confirm") != "1":
+        word_count = get_db().execute(
+            "SELECT COUNT(*) AS c FROM words WHERE library_id = ?",
+            (int(existing_row["id"]),),
+        ).fetchone()["c"]
+        if word_count > 0:
+            session["pending_preset_key"] = preset_key
+            session["pending_preset_name"] = library_name
+            session["pending_preset_count"] = word_count
+            return redirect(url_for("index", confirm_preset=1))
 
     library_id = get_or_create_library(library_name)
     reset_ecdict_library(library_id)
-    inserted, updated, _skipped = import_entries(entries, library_id=library_id)
+    inserted, _updated, _skipped = import_entries(entries, library_id=library_id)
     session["active_library_id"] = library_id
+    clear_pending_preset()
     clear_practice_session()
-    flash(f"{library_name} library rebuilt: {inserted} added, {updated} updated.", "success")
+    flash(f"{library_name} library rebuilt: {inserted} words added.", "success")
+    return redirect(url_for("index"))
+
+
+@app.post("/presets/ecdict/copy")
+def create_ecdict_preset_copy():
+    """Build the preset into a new, separately named library so the user's
+    existing edited copy is left untouched."""
+    preset_key = request.form.get("preset_key", "").strip().lower()
+    base_name, entries = load_preset_entries(preset_key)
+    if entries is None:
+        clear_pending_preset()
+        return redirect(url_for("index"))
+
+    library_name = unique_library_name(base_name)
+    library_id = get_or_create_library(library_name)
+    inserted, _updated, _skipped = import_entries(entries, library_id=library_id)
+    session["active_library_id"] = library_id
+    clear_pending_preset()
+    clear_practice_session()
+    flash(f"Created a separate copy \"{library_name}\": {inserted} words added.", "success")
     return redirect(url_for("index"))
 
 
