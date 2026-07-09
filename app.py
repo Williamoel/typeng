@@ -2829,14 +2829,21 @@ def lookup_ecdict_word(word: str) -> sqlite3.Row | None:
     if not word.strip():
         return None
     ensure_ecdict_lookup_index()
-    return get_db().execute(
-        """
-        SELECT phonetic, definition, frequency, source_tags
-        FROM ecdict_lookup
-        WHERE word_key = ?
-        """,
-        (word.strip().lower(),),
-    ).fetchone()
+    # When no ECDICT resource is available (e.g. released packages ship without
+    # the large csv), ensure_ecdict_lookup_index() returns early and the
+    # ecdict_lookup table is never created. Treat that as "no enrichment
+    # available" instead of letting the missing table raise a 500.
+    try:
+        return get_db().execute(
+            """
+            SELECT phonetic, definition, frequency, source_tags
+            FROM ecdict_lookup
+            WHERE word_key = ?
+            """,
+            (word.strip().lower(),),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return None
 
 
 def wordnet_source_signature() -> str | None:

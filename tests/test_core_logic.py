@@ -225,3 +225,47 @@ def test_parse_word_range_clamps_giant_values(monkeypatch):
     # Must stay well within SQLite's 64-bit integer range.
     assert 1 <= start <= 100_000_000
     assert start <= end <= 100_000_000
+
+
+# --- import without ECDICT (regression: missing ecdict_lookup table) --------
+
+def test_import_without_ecdict_resource_does_not_crash(monkeypatch, tmp_path):
+    """Released packages ship without ecdict.csv, so the ecdict_lookup table is
+    never built. Importing a word list must still succeed instead of raising
+    'no such table: ecdict_lookup' (which surfaced as a 500 on /import)."""
+    # Point every ECDICT source at a nonexistent path so no index is built.
+    missing = tmp_path / "nope.csv"
+    monkeypatch.setattr(app, "BUNDLED_ECDICT_PATH", missing)
+    monkeypatch.setattr(app, "ECDICT_CACHE_PATH", missing)
+    # Block any network fallback so the test stays offline and deterministic.
+    monkeypatch.setattr(
+        app, "load_ecdict_data", lambda: (_ for _ in ()).throw(OSError("offline"))
+    )
+
+    # Route the app's per-request connection to a throwaway in-memory DB that
+    # has libraries/words but deliberately NO ecdict_lookup table.
+    monkeypatch.setattr(app, "DB_PATH", tmp_path / "typeng.db")
+
+    with app.app.app_context():
+        app.get_db().executescript(
+            """
+            CREATE TABLE IF NOT EXISTS libraries (id INTEGER PRIMARY KEY, name TEXT);
+            INSERT INTO libraries (id, name) VALUES (1, 'Default Library');
+            CREATE TABLE IF NOT EXISTS words (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                library_id INTEGER NOT NULL DEFAULT 1,
+                word TEXT, part_of_speech TEXT, meaning TEXT,
+                example_sentence TEXT, example_translation TEXT,
+                phonetic TEXT, definition TEXT, frequency INTEGER,
+                source TEXT, source_tags TEXT,
+                UNIQUE(library_id, word, part_of_speech)
+            );
+            """
+        )
+        # No ecdict_lookup table exists — this is exactly the packaged state.
+        assert app.lookup_ecdict_word("abandon") is None  # must not raise
+        entries = [{"word": "abandon", "part_of_speech": "v", "meaning": "放弃"}]
+        # enrichment + insert should both survive the missing table
+        app.enrich_entries_from_ecdict(entries)
+        inserted, updated, _ = app.import_entries(entries, library_id=1)
+        assert inserted == 1
