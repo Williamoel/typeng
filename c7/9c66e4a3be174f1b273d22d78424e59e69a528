@@ -1,0 +1,22 @@
+app.py
+  s_9fa5955d877f0d::t_cfdda3f0ad437b 2832-2846
+tests/test_core_logic.py
+  s_9fa5955d877f0d::t_e0aaddd425e919 228-244,248-271
+  s_9fa5955d877f0d::t_f869cda3b39a6b 245-247
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c79c66e4a3be174f1b273d22d78424e59e69a528",
+  "prompts": {},
+  "sessions": {
+    "s_9fa5955d877f0d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1f25d526-a981-4c2d-942c-6bc284221752",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "williamoel <2797915706@qq.com>"
+    }
+  }
+}
