@@ -75,6 +75,10 @@ jobs:
           cp README.md README.zh-CN.md SOURCES.md dist/typeng/
           cp resources/README.md dist/typeng/resources/README.md
           cp -r samples dist/typeng/ 2>/dev/null || true
+          # Ship the Chinese dictionary-setup guide (PDF) at the top level so
+          # users see it right after extracting.
+          cp "docs/词典安装指南.pdf" dist/typeng/ 2>/dev/null \
+            || echo "::warning::词典安装指南.pdf not found; skipping."
 
       - name: Bundle Open English WordNet for auto examples
         shell: bash

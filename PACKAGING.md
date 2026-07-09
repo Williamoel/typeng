@@ -32,10 +32,17 @@ typeng/
     wiktionary/
       kaikki.org-dictionary-English.jsonl
   samples/
+  词典安装指南.pdf
   README.zh-CN.md
   README.md
   SOURCES.md
 ```
+
+The Chinese dictionary-setup guide `词典安装指南.pdf` is generated from
+`docs/dictionary_setup.zh-CN.md` by `docs/build_pdf.py` and committed to the
+repository, so the release workflow just copies it into the bundle. To
+regenerate it after editing the guide, run `python docs/build_pdf.py` (needs
+`pip install fpdf2` and a CJK font; see `docs/build_pdf.py` for font resolution).
 
 `data/` stores the local SQLite database and generated lookup caches. It should remain writable after extraction.
 
@@ -138,10 +145,16 @@ typeng/
     wiktionary/
       kaikki.org-dictionary-English.jsonl
   samples/
+  词典安装指南.pdf
   README.zh-CN.md
   README.md
   SOURCES.md
 ```
+
+中文《词典安装指南.pdf》由 `docs/build_pdf.py` 从 `docs/dictionary_setup.zh-CN.md`
+生成，并已提交进仓库，发布流程只是把它复制进发行包。修改指南后重新生成：运行
+`python docs/build_pdf.py`（需 `pip install fpdf2` 和一个中文字体，字体查找顺序见
+`docs/build_pdf.py`）。
 
 `data/` 用来保存本地 SQLite 数据库和生成的查询缓存。用户解压后，这个目录必须保持可写。
 
