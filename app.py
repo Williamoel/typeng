@@ -3401,11 +3401,14 @@ def ranked_wiktionary_example_candidates(word: str, part_of_speech: str, limit: 
         tags = {tag.strip() for tag in str(row["sense_tags"] or "").split(",") if tag.strip()}
         usable_rows.append((row, tags))
 
-    candidates = [
-        (row, tags)
-        for row, tags in usable_rows
-        if not ({"archaic", "obsolete", "dated", "rare"} & tags)
-    ]
+    # Prefer examples without archaic/obsolete/dated/rare sense tags. But if a
+    # word's ONLY examples carry those tags (e.g. "rectangle", whose Wiktionary
+    # examples are all archaic), fall back to using them rather than returning
+    # nothing — the scoring penalties below still push them to the bottom when
+    # cleaner examples exist elsewhere.
+    dislike_tags = {"archaic", "obsolete", "dated", "rare"}
+    preferred = [(row, tags) for row, tags in usable_rows if not (dislike_tags & tags)]
+    candidates = preferred if preferred else usable_rows
 
     scored: list[tuple[tuple[int, int, bool, int, int, str], sqlite3.Row]] = []
     for row, tags in candidates:

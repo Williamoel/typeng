@@ -337,3 +337,37 @@ def test_cloze_accepts_both_spellings():
     assert "colour" in forms2 and "color" in forms2
     # inflections still generated on top of variants
     assert "colours" in forms2 or "colors" in forms2
+
+
+# --- archaic-only fallback (regression: rectangle) -------------------------
+
+def test_ranked_candidates_falls_back_to_archaic_when_only_option(monkeypatch):
+    """A word whose only usable examples are archaic must still return one,
+    instead of being filtered down to zero candidates."""
+    import sqlite3 as _sqlite
+
+    # Two rows, both archaic — the pre-fix code filtered these out entirely.
+    archaic_rows = [
+        {"example_sentence": "For why should you praise the integrity of a Square who defends the rectangle.",
+         "definition": "a quadrilateral", "example_type": "quotation",
+         "sense_tags": "archaic", "part_group": "n"},
+    ]
+
+    class FakeConn:
+        def execute(self, *a, **k):
+            class R:
+                def fetchall(self_inner):
+                    return [_FakeRow(r) for r in archaic_rows]
+            return R()
+
+    class _FakeRow:
+        def __init__(self, d): self._d = d
+        def __getitem__(self, k): return self._d[k]
+
+    monkeypatch.setattr(app, "get_db", lambda: FakeConn())
+    monkeypatch.setattr(app, "wiktionary_jsonl_path", lambda: "dummy")
+    monkeypatch.setattr(app, "ensure_wiktionary_lookup_index", lambda *a, **k: None)
+
+    out = app.ranked_wiktionary_example_candidates("rectangle", "noun")
+    assert len(out) >= 1
+    assert "rectangle" in out[0]["example_sentence"].lower()
