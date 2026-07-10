@@ -158,7 +158,7 @@ WIKTIONARY_JSONL_CANDIDATES = [
     BASE_DIR / "kaikki.org-dictionary-English.jsonl",
     WIKTIONARY_DIR / "kaikki.org-dictionary-English.jsonl",
 ]
-WIKTIONARY_SCHEMA_VERSION = 6
+WIKTIONARY_SCHEMA_VERSION = 7
 TRADITIONAL_TO_SIMPLIFIED = str.maketrans(
     {
         "國": "国",
