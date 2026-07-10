@@ -1,0 +1,22 @@
+app.py
+  s_9fa5955d877f0d::t_bbd10d8ffea90c 3509
+  s_9fa5955d877f0d::t_f78f1d671c7d97 3429-3430,3432-3433,3436-3438,3440,3442-3449,3451-3452
+  s_9fa5955d877f0d::t_0a670055cdf07b 3459
+  s_9fa5955d877f0d::t_9c083ff62e3503 2181-2183
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d90b08997ecb6018d83c96acbd56532f4a285c75",
+  "prompts": {},
+  "sessions": {
+    "s_9fa5955d877f0d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1f25d526-a981-4c2d-942c-6bc284221752",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "williamoel <2797915706@qq.com>"
+    }
+  }
+}
