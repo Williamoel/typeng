@@ -2178,6 +2178,9 @@ def normalize_wiktionary_pos(pos: str) -> str:
 
 
 def clean_wiktionary_example_text(text: str) -> str:
+    # Strip Wiktionary omission markers that add no value for cloze practice
+    # but would otherwise fail the special-character filter (the brackets).
+    text = re.sub(r"\[…\]|\[\.\.\.\]|\[sic\]|\[Sic\]", "", text)
     cleaned = re.sub(r"\s+", " ", text).strip()
     cleaned = cleaned.replace(" ", " ")
     return cleaned
@@ -3409,10 +3412,7 @@ def ensure_wiktionary_lookup_index(target_words: set[str] | None = None) -> None
 def ranked_wiktionary_example_candidates(word: str, part_of_speech: str, limit: int = 8) -> list[sqlite3.Row]:
     if not word.strip() or not wiktionary_jsonl_path():
         return []
-    # Index (and later query) every British/American spelling so a word stored
-    # under one spelling still finds examples filed under the other.
     word_keys = sorted(spelling_variants(word))
-    ensure_wiktionary_lookup_index(set(word_keys))
     lookup_groups = wiktionary_lookup_groups(part_of_speech, word)
     group_placeholders = ",".join("?" for _ in lookup_groups)
     key_placeholders = ",".join("?" for _ in word_keys)
@@ -3426,60 +3426,37 @@ def ranked_wiktionary_example_candidates(word: str, part_of_speech: str, limit: 
         """,
         (*word_keys, *lookup_groups),
     ).fetchall()
-    requested_group = normalize_part_group(part_of_speech)
-    usable_rows: list[tuple[sqlite3.Row, set[str]]] = []
+    dislike_tags = {"archaic", "obsolete", "dated", "rare"}
+    suitable: list[dict[str, object]] = []
     for row in rows:
-        sentence = row["example_sentence"]
-        if not usable_wiktionary_example(sentence, word):
+        s = row["example_sentence"]
+        if not usable_wiktionary_example(s, word):
             continue
         tags = {tag.strip() for tag in str(row["sense_tags"] or "").split(",") if tag.strip()}
-        usable_rows.append((row, tags))
+        suitable.append((row, tags))
+    preferred = [(row, tags) for row, tags in suitable if not (dislike_tags & tags)]
+    candidates = preferred if preferred else suitable
 
-    # Prefer examples without archaic/obsolete/dated/rare sense tags. But if a
-    # word's ONLY examples carry those tags (e.g. "rectangle", whose Wiktionary
-    # examples are all archaic), fall back to using them rather than returning
-    # nothing — the scoring penalties below still push them to the bottom when
-    # cleaner examples exist elsewhere.
-    dislike_tags = {"archaic", "obsolete", "dated", "rare"}
-    preferred = [(row, tags) for row, tags in usable_rows if not (dislike_tags & tags)]
-    candidates = preferred if preferred else usable_rows
-
-    scored: list[tuple[tuple[int, int, bool, int, int, str], sqlite3.Row]] = []
+    scored: list[tuple[tuple[int, int, bool, int, int, str], dict[str, object]]] = []
     for row, tags in candidates:
-        tag_penalty = 0
-        if requested_group == "aux":
-            if "auxiliary" in tags or "modal" in tags:
-                tag_penalty -= 8
-            else:
-                tag_penalty += 12
-        elif requested_group == "v" and ("auxiliary" in tags or "modal" in tags):
-            tag_penalty += 8
-        elif requested_group == "conj":
-            if "conjunctive" in tags:
-                tag_penalty -= 8
-            else:
-                tag_penalty += 10
-        elif requested_group == "phrase" and row["part_group"] != "phrase":
-            tag_penalty += 1
-        if "obsolete" in tags:
-            tag_penalty += 18
-        if "archaic" in tags:
-            tag_penalty += 12
-        if "dated" in tags:
-            tag_penalty += 8
-        if "rare" in tags:
-            tag_penalty += 5
-        score = sentence_quality_score(sentence, word, part_of_speech, source="wiktionary")
-        if score[1] > 10:
+        sentence = row["example_sentence"]
+        tg_pen = 0
+        if "obsolete" in tags: tg_pen += 18
+        if "archaic" in tags: tg_pen += 12
+        if "dated" in tags: tg_pen += 8
+        if "rare" in tags: tg_pen += 5
+        sq = sentence_quality_score(sentence, word, part_of_speech, source="wiktionary")
+        if sq[1] > 10:
             continue
-        short_sentence_penalty = 0 if english_word_count(sentence) >= 6 else 1
-        ranked_score = (tag_penalty, short_sentence_penalty, row["example_type"] == "quotation", score[2], score[3], score[4])
+        sp = 0 if english_word_count(sentence) >= 6 else 1
+        ranked_score = (tg_pen, sp, row["example_type"] == "quotation", sq[2], sq[3], sq[4])
         scored.append((ranked_score, row))
     scored.sort(key=lambda item: item[0])
     return [row for _, row in scored[:limit]]
 
 
 def lookup_wiktionary_example(word: str, part_of_speech: str) -> sqlite3.Row | None:
+    ensure_wiktionary_lookup_index(set(spelling_variants(word)))
     candidates = ranked_wiktionary_example_candidates(word, part_of_speech, limit=1)
     return candidates[0] if candidates else None
 
@@ -3529,6 +3506,7 @@ def refresh_example_candidate(
     current = (current_sentence or "").strip()
     seen_sentences = {current} if current else set()
     candidates: list[sqlite3.Row] = []
+    ensure_wiktionary_lookup_index(set(spelling_variants(word)))
 
     for row in ranked_wiktionary_example_candidates(word, part_of_speech, limit=top_n):
         sentence = str(row["example_sentence"] or "").strip()
