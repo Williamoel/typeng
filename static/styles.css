@@ -924,6 +924,13 @@ h2 {
   flex-wrap: wrap;
 }
 
+.edit-search-primary button,
+.edit-search-primary .secondary-button {
+  min-height: 30px;
+  padding: 0 14px;
+  font-size: 13px;
+}
+
 .view-search-primary {
   grid-area: search;
   display: flex;
@@ -931,6 +938,13 @@ h2 {
   justify-content: flex-start;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.view-search-primary button,
+.view-search-primary .secondary-button {
+  min-height: 30px;
+  padding: 0 14px;
+  font-size: 13px;
 }
 
 .edit-search-primary input[type="search"] {
