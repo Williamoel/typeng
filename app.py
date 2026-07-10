@@ -1506,6 +1506,46 @@ def cloze_prompt(sentence: str | None, word: str) -> str:
     return prompt if replacements else ""
 
 
+def truncate_cloze_prompt(prompt: str, max_chars: int = 240) -> str:
+    """Keep ~max_chars of a long cloze prompt centered on the ____ marker.
+
+    Sentences longer than max_chars are accepted into the word bank and shown
+    in full during preview; this function only affects how they appear in the
+    cloze exercise, where a focused window around the target word is clearer
+    than a wall of text.
+    """
+    if len(prompt) <= max_chars:
+        return prompt
+
+    marker = "____"
+    pos = prompt.find(marker)
+    if pos == -1:
+        return prompt[: max_chars - 1] + "…"
+
+    half = (max_chars - len(marker)) // 2
+
+    start = max(0, pos - half)
+    if start > 0:
+        # Align to a word boundary so we don't cut mid-word.
+        space = prompt.find(" ", start)
+        if space != -1 and space < pos:
+            start = space + 1
+
+    end = min(len(prompt), pos + len(marker) + half)
+    if end < len(prompt):
+        # Back up to the previous word boundary.
+        space = prompt.rfind(" ", 0, end)
+        if space != -1 and space > pos + len(marker):
+            end = space
+
+    result = prompt[start:end].strip()
+    if start > 0:
+        result = "…" + result
+    if end < len(prompt):
+        result = result + "…"
+    return result
+
+
 def valid_example_sentence(sentence: str | None, word: str) -> bool:
     return bool(cloze_prompt(sentence, word))
 
@@ -2231,7 +2271,7 @@ def usable_wiktionary_example(sentence: str, word: str) -> bool:
         return False
     if contains_blocked_example_word(stripped):
         return False
-    if len(stripped) < 6 or len(stripped) > 240:
+    if len(stripped) < 6 or len(stripped) > 500:
         return False
     if re.search(r"https?://|www\.|[@#]|→|<|>|[_{}\[\]]", stripped):
         return False
@@ -4377,7 +4417,8 @@ def practice():
         session["practice_index"] = index + 1
         return redirect(url_for("practice"))
 
-    cloze_text = cloze_prompt(word["example_sentence"], word["word"])
+    full_cloze_text = cloze_prompt(word["example_sentence"], word["word"])
+    cloze_text = truncate_cloze_prompt(full_cloze_text) if full_cloze_text else ""
     prompt_mode = effective_prompt_mode(word)
     return render_template(
         "practice.html",
@@ -4393,6 +4434,7 @@ def practice():
         show_definition=bool(session.get("show_definition", False)),
         show_phonetic=bool(session.get("show_phonetic", True)),
         cloze_text=cloze_text,
+        cloze_truncated=bool(full_cloze_text and cloze_text != full_cloze_text),
         cloze_answer=cloze_answer(word["example_sentence"], word["word"]),
         missed_count=len(session.get("missed_ids", [])),
         practice_round=int(session.get("practice_round", 1)),

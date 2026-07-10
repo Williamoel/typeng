@@ -385,3 +385,30 @@ def test_example_note_from_tags_ignores_ordinary():
     assert app.example_note_from_tags(None) is None
     assert app.example_note_from_tags("") is None
     assert app.example_note_from_tags("transitive,informal") is None
+
+
+# --- truncate_cloze_prompt -------------------------------------------------
+
+def test_truncate_cloze_prompt_short_sentence_unchanged():
+    short = "The quick brown fox ____ over the lazy dog."
+    assert app.truncate_cloze_prompt(short) == short
+
+
+def test_truncate_cloze_prompt_long_truncated_around_marker():
+    long_prompt = "x " * 120 + "____" + " y" * 120
+    result = app.truncate_cloze_prompt(long_prompt, max_chars=240)
+    assert "____" in result
+    assert len(result) <= 250  # allow slight overshoot from word-boundary
+    assert result.startswith("…")
+    assert result.endswith("…")
+
+
+def test_truncate_cloze_prompt_no_marker_truncates_tail():
+    long_no_marker = "abcdefghij " * 30
+    result = app.truncate_cloze_prompt(long_no_marker, max_chars=50)
+    assert len(result) <= 53
+    assert "…" in result
+
+
+def test_truncate_cloze_prompt_empty():
+    assert app.truncate_cloze_prompt("") == ""

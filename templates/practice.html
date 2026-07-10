@@ -67,6 +67,9 @@
         {% if word.example_note %}
           <p class="example-note-warning" role="note">⚠️ 这个例句可能读起来偏怪：{{ word.example_note }}（来自词典中较少用的义项，仅供拼写练习参考）</p>
         {% endif %}
+        {% if cloze_truncated %}
+          <p class="example-note-warning" role="note">⚠️ 原句过长，cloze 练习仅展示包含目标词的核心部分（例句已在预习和词库中完整保留）</p>
+        {% endif %}
         <form class="answer-form inline-answer-form" action="{{ url_for('submit_answer') }}" method="post" autocomplete="off">
           <h1 class="cloze-prompt inline-cloze">
             <span>{{ cloze_parts[0] }}</span><input name="answer" type="text" aria-label="Missing word" maxlength="{{ answer_limit }}" style="--answer-ch: {{ answer_limit }};" autofocus required><span>{{ cloze_parts[1] if cloze_parts|length > 1 else "" }}</span>
