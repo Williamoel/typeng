@@ -1,0 +1,31 @@
+README.md
+  s_9fa5955d877f0d::t_b9f07e4a675f9f 409
+  s_9fa5955d877f0d::t_05a0aa274cd69b 392-394,396,399,401
+  s_9fa5955d877f0d::t_1a8ffe515e27ee 88,90-91
+app.py
+  s_9fa5955d877f0d::t_dbe0eefe935fd4 22
+  s_9fa5955d877f0d::t_0dbe954336edc4 23
+models.py
+  s_9fa5955d877f0d::t_1ba9a8aa04ea30 1-989
+tests/test_example_engine.py
+  s_9fa5955d877f0d::t_769f6f7a9215a3 1-167
+README.zh-CN.md
+  s_9fa5955d877f0d::t_5edc06e4ed3196 351-352,354,357,359,367
+  s_9fa5955d877f0d::t_98f030b4b2a5d4 75,77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7ae212da62b77c60687bbd6c9031cfd28fafa022",
+  "prompts": {},
+  "sessions": {
+    "s_9fa5955d877f0d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1f25d526-a981-4c2d-942c-6bc284221752",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "williamoel <2797915706@qq.com>"
+    }
+  }
+}
