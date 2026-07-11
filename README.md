@@ -85,9 +85,10 @@ fully offline.
 </td>
 <td width="50%">
 
-### 🔒 100% local
+### 🔒 Local-first
 Your libraries, progress, and database never leave your computer. No account, no sync,
-no tracking.
+no tracking. (Pronunciation uses an optional online service; turn it off for fully
+offline use.)
 
 </td>
 </tr>
@@ -388,15 +389,16 @@ samples/               sample import files
 
 ## Development Status
 
-TypEng is currently a student-scale local application, not a fully packaged desktop program for ordinary users yet. The current goal is to first build a usable, understandable Python project that can keep expanding, then gradually improve packaging, testing, and release workflow.
+TypEng is an actively maintained open-source project. Multi-platform desktop packages
+(Windows, macOS, Linux) are built and released automatically via GitHub Actions.
+v0.1.2 as of July 2026.
 
-Areas that still need improvement:
+Areas being worked on:
 
-- packaging for non-technical users
 - import/export of learning progress
-- better example-sentence quality scoring
+- better example-sentence quality scoring and ML-based ranking
 - more accurate dictionary sense matching
-- more complete documentation and tests
+- integration-test coverage beyond the existing unit + engine suites
 - optional interface language switching
 
 ## Roadmap
@@ -404,13 +406,12 @@ Areas that still need improvement:
 Near term:
 
 - continue improving automatic example selection
+- ML-based example quality ranking
 - improve Wiktionary English definition matching
 - add import/export for libraries and learning progress
-- add tests for review scheduling and cloze behavior
 
 Long term:
 
-- desktop packaging
 - richer statistics
 - better audio source management
 - optional online dictionary lookup

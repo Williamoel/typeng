@@ -19,6 +19,8 @@ from urllib.parse import urlsplit
 
 from flask import Flask, abort, flash, g, redirect, render_template, request, session, url_for
 
+import models  # pure domain logic
+
 try:
     from opencc import OpenCC
 except ImportError:
