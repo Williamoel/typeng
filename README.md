@@ -287,7 +287,7 @@ Get the latest packages from the releases page:
 
 ### Linux
 
-1. Download `typeng-v0.2.0-linux-x64.zip`.
+1. Download `typeng-v0.2.1-linux-x64.zip`.
 2. Extract the folder, then run `./typeng` inside it.
 
 ### Built-in lexicon cache
@@ -402,7 +402,7 @@ Lexical data now follows a `Word → Sense → Example` model, separated from pe
 
 TypEng is an actively maintained open-source project. Multi-platform desktop packages
 (Windows, macOS, Linux) are built and released automatically via GitHub Actions.
-v0.2.0 as of August 2026.
+v0.2.1 as of August 2026.
 
 Areas being worked on:
 
