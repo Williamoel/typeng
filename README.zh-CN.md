@@ -247,7 +247,7 @@ TypEng 为每个平台提供独立、开箱即用的本地压缩包。你不需�
 
 ### Linux
 
-1. 下载 `typeng-v0.2.1-linux-x64.zip`。
+1. 下载 `typeng-v0.2.2-linux-x64.zip`。
 2. 解压文件夹，然后运行其中的 `./typeng`。
 
 ### 内置词典缓存
@@ -358,7 +358,7 @@ samples/               示例导入文件
 ## 开发状态
 
 TypEng 是一个持续维护中的开源项目。已通过 GitHub Actions 自动构建和发布
-Windows、macOS、Linux 多平台桌面包。当前版本 v0.2.1（2026 年 8 月）。
+Windows、macOS、Linux 多平台桌面包。当前版本 v0.2.2（2026 年 8 月）。
 
 正在改进的方向：
 

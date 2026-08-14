@@ -10,7 +10,52 @@ permissions:
   contents: write
 
 jobs:
+  prepare-lexicon:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build compact runtime lexicon
+        shell: bash
+        run: |
+          BUILD_HOME="$RUNNER_TEMP/typeng-lexicon-build"
+          mkdir -p "$BUILD_HOME/resources" resources/lexicon
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 \
+            --connect-timeout 30 --max-time 600 \
+            -o "$BUILD_HOME/resources/ecdict.csv" \
+            "https://raw.githubusercontent.com/skywind3000/ECDICT/master/ecdict.csv"
+          mkdir -p "$BUILD_HOME/resources/efllex"
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 \
+            --connect-timeout 30 --max-time 600 \
+            -o "$BUILD_HOME/resources/efllex/EFLLex.tsv" \
+            "https://cental.uclouvain.be/cefrlex/static/resources/en/EFLLex.tsv"
+          mkdir -p "$BUILD_HOME/resources/wiktionary"
+          cp resources/wiktionary/exam-pos-index.tsv \
+            "$BUILD_HOME/resources/wiktionary/exam-pos-index.tsv"
+          python scripts/prepare_lexicon_cache.py \
+            --build-home "$BUILD_HOME" \
+            --output resources/lexicon/typeng-lexicon.sqlite3
+
+      - name: Upload runtime lexicon
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-lexicon
+          path: resources/lexicon/typeng-lexicon.sqlite3
+
   build:
+    needs: prepare-lexicon
     strategy:
       fail-fast: false
       matrix:
@@ -42,26 +87,11 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Build compact runtime lexicon
-        shell: bash
-        run: |
-          BUILD_HOME="$RUNNER_TEMP/typeng-lexicon-build"
-          mkdir -p "$BUILD_HOME/resources" resources/lexicon
-          curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 \
-            --connect-timeout 30 --max-time 600 \
-            -o "$BUILD_HOME/resources/ecdict.csv" \
-            "https://raw.githubusercontent.com/skywind3000/ECDICT/master/ecdict.csv"
-          mkdir -p "$BUILD_HOME/resources/efllex"
-          curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 \
-            --connect-timeout 30 --max-time 600 \
-            -o "$BUILD_HOME/resources/efllex/EFLLex.tsv" \
-            "https://cental.uclouvain.be/cefrlex/static/resources/en/EFLLex.tsv"
-          mkdir -p "$BUILD_HOME/resources/wiktionary"
-          cp resources/wiktionary/exam-pos-index.tsv \
-            "$BUILD_HOME/resources/wiktionary/exam-pos-index.tsv"
-          python scripts/prepare_lexicon_cache.py \
-            --build-home "$BUILD_HOME" \
-            --output resources/lexicon/typeng-lexicon.sqlite3
+      - name: Download runtime lexicon
+        uses: actions/download-artifact@v4
+        with:
+          name: runtime-lexicon
+          path: resources/lexicon
 
       - name: Build with PyInstaller (Windows)
         if: runner.os == 'Windows'
