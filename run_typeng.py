@@ -76,7 +76,6 @@ def main() -> None:
         home = APP_HOME
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    (home / "resources" / "wordnet").mkdir(parents=True, exist_ok=True)
     (home / "resources" / "wiktionary").mkdir(parents=True, exist_ok=True)
 
     port = pick_port()
@@ -95,7 +94,9 @@ def main() -> None:
         pass
 
     threading.Thread(target=open_browser_when_ready, args=(url,), daemon=True).start()
-    app.run(host=HOST, port=port, debug=False, use_reloader=False, threaded=False)
+    # Dictionary maintenance and audio/page requests should not block one
+    # another in the local server. SQLite WAL mode handles concurrent readers.
+    app.run(host=HOST, port=port, debug=False, use_reloader=False, threaded=True)
 
 
 if __name__ == "__main__":

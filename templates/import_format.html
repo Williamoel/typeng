@@ -1,19 +1,19 @@
 {% extends "base.html" %}
 
-{% block title %}TypEng - Import Format{% endblock %}
+{% block title %}TypEng · 导入格式{% endblock %}
 
 {% block content %}
 <section class="panel docs-panel">
   <div class="section-heading">
-    <p class="eyebrow">Import Words</p>
-    <h1>Import Format</h1>
-    <p>The same guide is in <code>README.md</code> under <code>Import Format</code>.</p>
+    <p class="eyebrow">导入词汇</p>
+    <h1>导入格式</h1>
+    <p>同样的说明也可以在项目文档中查看。</p>
   </div>
 
   <div class="docs-grid">
     <article>
       <h2>TXT</h2>
-      <p>Use three required fields: word, part of speech, Chinese meaning. An example sentence can be added as an optional fourth field.</p>
+      <p>前三列依次为单词、词性、中文释义；第四列可以填写自己的例句，系统会在 Cloze 中优先使用。</p>
       <pre><code>abandon	verb	放弃；遗弃
 ability	noun	能力
 close	adjective	近的；亲密的
@@ -23,7 +23,7 @@ abandon	verb	放弃；遗弃	The company decided to abandon the old plan.</code>
 
     <article>
       <h2>CSV</h2>
-      <p>CSV can include a header, or use the same columns without a header.</p>
+      <p>CSV 可以包含表头，也可以直接按相同列顺序填写。</p>
       <pre><code>word,part_of_speech,meaning,example_sentence
 abandon,verb,放弃；遗弃,The company decided to abandon the old plan.
 ability,noun,能力,She has the ability to solve complex problems.</code></pre>

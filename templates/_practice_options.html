@@ -1,29 +1,29 @@
 <fieldset class="session-options">
-  <legend>Session options</legend>
+  <legend>练习设置</legend>
   <label class="check-label">
     <input type="checkbox" name="show_chinese" {% if show_chinese_default|default(true) %}checked{% endif %}>
-    Show Chinese
+    中文释义
   </label>
   <label class="check-label">
     <input type="checkbox" name="show_definition" {% if show_definition_default|default(false) %}checked{% endif %}>
-    English definition
+    英文释义
   </label>
   <label class="check-label">
     <input type="checkbox" name="auto_audio" {% if auto_audio_default|default(true) %}checked{% endif %}>
-    Auto audio
+    自动发音
   </label>
   <label class="check-label">
     <input type="checkbox" name="show_phonetic" {% if show_phonetic_default|default(true) %}checked{% endif %}>
-    Phonetic
+    音标
   </label>
   {% if include_cloze|default(false) %}
     <label class="check-label">
       <input type="checkbox" name="use_cloze" data-cloze-with>
-      With cloze
+      追加 Cloze
     </label>
     <label class="check-label">
       <input type="checkbox" name="only_cloze" data-cloze-only>
-      Only in cloze
+      仅 Cloze
     </label>
   {% endif %}
 </fieldset>

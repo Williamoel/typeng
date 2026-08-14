@@ -1,749 +1,108 @@
 from __future__ import annotations
 
-import csv
-import io
-import json
 import os
 import random
 import re
-import secrets
 import sqlite3
 import sys
 import threading
-import urllib.request
-import zipfile
 from datetime import datetime, timedelta, timezone
 from math import ceil
 from pathlib import Path
-from urllib.parse import urlsplit
 
 from flask import Flask, abort, flash, g, redirect, render_template, request, session, url_for
 
-import models  # pure domain logic
+from typeng.constants import (
+    BLOCKED_EXAMPLE_WORDS,
+    CLOZE_IRREGULAR_FORMS,
+    CLOZE_SCOPES,
+    CLOZE_SCOPE_ONLY,
+    CLOZE_SCOPE_WITH,
+    DEFAULT_REVIEW_TARGET_COUNT,
+    DEFAULT_WRONG_REVIEW_TARGET_COUNT,
+    ECDICT_DEFINITION_POS_RE,
+    ECDICT_DEFINITION_SPLIT_RE,
+    ECDICT_POS_PREFIX_RE,
+    ECDICT_PRESET_LIBRARIES,
+    LIBRARY_PAGE_SIZE,
+    LIBRARY_SORT_MODES,
+    MAX_REVIEW_TARGET_COUNT,
+    MAX_WRONG_REVIEW_TARGET_COUNT,
+    MIN_REVIEW_TARGET_COUNT,
+    MIN_WRONG_REVIEW_TARGET_COUNT,
+    PART_OF_SPEECH_OPTIONS,
+    PROMPT_AUDIO,
+    PROMPT_CHINESE,
+    PROMPT_CLOZE,
+    PROMPT_MIXED,
+    PROMPT_MODES,
+    REVIEW_INTERVAL_DAYS,
+    SORT_ALPHA,
+    SORT_FREQUENCY,
+    STATUS_LEARNED,
+    STATUS_NEW,
+    STATUS_WRONG,
+)
+from typeng.domain import *  # compatibility exports while routes are split incrementally
+from typeng.dictionaries import wiktionary as _wiktionary
+from typeng.dictionaries import ecdict as _ecdict
+from typeng.db import connect as connect_db
+from typeng.cefr import ensure_efllex_index
+from typeng.preset_policy import apply_exam_policy, ensure_wiktionary_exam_pos_index
+from typeng.lexicon_cache import lookup_available
+from typeng.paths import resolve_app_home, resolve_bundle_dir, resolve_resource_dir
+from typeng.performance import register_request_timing
+from typeng.security import is_local_host, is_local_origin, load_or_create_secret
+from typeng import schema as _schema
+from typeng.repositories import libraries as library_repository
+from typeng.repositories import examples as example_repository
+from typeng.repositories import lexicon as lexicon_repository
+from typeng.repositories import units as unit_repository
+from typeng.repositories import words as word_repository
+from typeng.services import review as review_service
 
-try:
-    from opencc import OpenCC
-except ImportError:
-    OpenCC = None
-
-
-def resolve_bundle_dir() -> Path:
-    """Directory that holds bundled read-only assets such as templates/ and static/."""
-    if getattr(sys, "frozen", False):
-        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
-    return Path(__file__).resolve().parent
-
-
-def _platform_data_dir() -> Path:
-    """Return the platform-standard application data directory for TypEng.
-
-    - Windows: %APPDATA%\\TypEng  (e.g. C:\\Users\\<name>\\AppData\\Roaming\\TypEng)
-    - macOS:   ~/Library/Application Support/TypEng
-    - Linux:   $XDG_DATA_HOME/TypEng  (defaults to ~/.local/share/TypEng)
-    """
-    if sys.platform == "win32":
-        base = os.environ.get("APPDATA", "")
-        if base:
-            return Path(base) / "TypEng"
-        return Path.home() / "AppData" / "Roaming" / "TypEng"
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "TypEng"
-    # Linux / other Unix
-    xdg = os.environ.get("XDG_DATA_HOME", "")
-    if xdg:
-        return Path(xdg) / "TypEng"
-    return Path.home() / ".local" / "share" / "TypEng"
-
-
-def _migrate_legacy_data(new_data_dir: Path, exe_dir: Path) -> None:
-    """Auto-migrate data from the old layout (data/ beside the exe) to the new
-    platform-standard location. Runs once on first startup after upgrading.
-
-    Only migrates if:
-    - The new data dir does NOT already have a typeng.db (fresh install in new location)
-    - The old exe-adjacent data/ directory DOES have a typeng.db (user had data)
-    """
-    import shutil
-
-    new_db = new_data_dir / "typeng.db"
-    if new_db.exists():
-        return  # New location already has data, nothing to do.
-
-    old_data_dir = exe_dir / "data"
-    old_db = old_data_dir / "typeng.db"
-    if not old_db.exists():
-        return  # No legacy data to migrate.
-
-    # Copy the entire data/ contents to the new location.
-    new_data_dir.mkdir(parents=True, exist_ok=True)
-    for item in old_data_dir.iterdir():
-        dest = new_data_dir / item.name
-        if dest.exists():
-            continue
-        if item.is_dir():
-            shutil.copytree(item, dest)
-        else:
-            shutil.copy2(item, dest)
-
-    # Leave a marker so the user knows where data went.
-    notice = old_data_dir / "DATA_MOVED.txt"
-    if not notice.exists():
-        try:
-            notice.write_text(
-                f"Your TypEng data has been moved to:\n{new_data_dir}\n\n"
-                f"This folder is no longer used. You can safely delete it.\n",
-                encoding="utf-8",
-            )
-        except OSError:
-            pass
-
-
-def resolve_app_home() -> Path:
-    """Directory for user-visible, writable app files such as data/ and resources/.
-
-    Priority:
-    1. TYPENG_HOME environment variable (for testing / advanced users).
-    2. Platform-standard data directory (APPDATA / Library / XDG_DATA_HOME).
-       This ensures data persists across version upgrades even if the user
-       extracts a new release to a different folder.
-    3. (dev mode only) Source tree directory, for convenience.
-    """
-    env_home = os.environ.get("TYPENG_HOME", "").strip()
-    if env_home:
-        return Path(env_home).resolve()
-
-    if getattr(sys, "frozen", False):
-        # Packaged mode: use platform-standard directory and migrate old data.
-        home = _platform_data_dir()
-        home.mkdir(parents=True, exist_ok=True)
-        exe_dir = Path(sys.executable).resolve().parent
-        _migrate_legacy_data(home / "data", exe_dir)
-        return home
-
-    # Development mode: use source tree (same as before).
-    return Path(__file__).resolve().parent
-
-
-def resolve_resource_dir() -> Path:
-    """Prefer external resources/ so users can drop large dictionary files beside the app.
-
-    In packaged mode the exe-adjacent resources/ is checked first (so users can
-    still drop dictionary files next to the app), then the platform data dir,
-    then the bundled read-only resources inside the PyInstaller archive.
-    """
-    if getattr(sys, "frozen", False):
-        exe_adjacent = Path(sys.executable).resolve().parent / "resources"
-        if exe_adjacent.exists():
-            return exe_adjacent
-    external = APP_HOME / "resources"
-    if external.exists():
-        return external
-    return APP_ROOT / "resources"
-
-
-APP_ROOT = resolve_bundle_dir()
-APP_HOME = resolve_app_home()
+SOURCE_ROOT = Path(__file__).resolve().parent
+APP_ROOT = resolve_bundle_dir(SOURCE_ROOT)
+APP_HOME = resolve_app_home(SOURCE_ROOT)
 BASE_DIR = APP_ROOT
 DATA_DIR = APP_HOME / "data"
-RESOURCE_DIR = resolve_resource_dir()
+RESOURCE_DIR = resolve_resource_dir(APP_HOME, APP_ROOT)
 DB_PATH = DATA_DIR / "typeng.db"
 BUNDLED_ECDICT_PATH = RESOURCE_DIR / "ecdict.csv"
 ECDICT_CACHE_PATH = DATA_DIR / "ecdict.csv"
 ECDICT_SOURCE_URL = "https://raw.githubusercontent.com/skywind3000/ECDICT/master/ecdict.csv"
-ECDICT_LOOKUP_SCHEMA_VERSION = 1
-WORDNET_DIR = RESOURCE_DIR / "wordnet"
-WORDNET_ZIP_PATH = WORDNET_DIR / "english-wordnet-2025-json.zip"
-WORDNET_SCHEMA_VERSION = 1
+ECDICT_LOOKUP_SCHEMA_VERSION = 4
+EFLLEx_PATH = RESOURCE_DIR / "efllex" / "EFLLex.tsv"
+WIKTIONARY_EXAM_POS_PATH = RESOURCE_DIR / "wiktionary" / "exam-pos-index.tsv"
 WIKTIONARY_DIR = RESOURCE_DIR / "wiktionary"
 WIKTIONARY_JSONL_CANDIDATES = [
     APP_HOME / "kaikki.org-dictionary-English.jsonl",
     BASE_DIR / "kaikki.org-dictionary-English.jsonl",
     WIKTIONARY_DIR / "kaikki.org-dictionary-English.jsonl",
 ]
-WIKTIONARY_SCHEMA_VERSION = 7
-TRADITIONAL_TO_SIMPLIFIED = str.maketrans(
-    {
-        "國": "国",
-        "發": "发",
-        "線": "线",
-        "戲": "戏",
-        "遊": "游",
-        "讓": "让",
-        "納": "纳",
-        "稅": "税",
-        "預": "预",
-        "算": "算",
-        "買": "买",
-        "罐": "罐",
-        "番": "番",
-        "茄": "茄",
-        "這": "这",
-        "個": "个",
-        "對": "对",
-        "為": "为",
-        "會": "会",
-        "們": "们",
-        "學": "学",
-        "習": "习",
-        "說": "说",
-        "語": "语",
-        "與": "与",
-        "離": "离",
-        "遠": "远",
-        "還": "还",
-        "沒": "没",
-        "麼": "么",
-        "樣": "样",
-        "種": "种",
-        "應": "应",
-        "該": "该",
-        "時": "时",
-        "間": "间",
-        "題": "题",
-        "實": "实",
-        "現": "现",
-        "處": "处",
-        "理": "理",
-        "選": "选",
-        "擇": "择",
-        "體": "体",
-        "驗": "验",
-        "單": "单",
-        "詞": "词",
-        "書": "书",
-        "電": "电",
-        "腦": "脑",
-        "網": "网",
-        "頁": "页",
-        "開": "开",
-        "關": "关",
-        "閉": "闭",
-        "異": "异",
-        "義": "义",
-        "舊": "旧",
-        "計": "计",
-        "劃": "划",
-        "標": "标",
-        "籤": "签",
-        "復": "复",
-        "雜": "杂",
-        "戰": "战",
-        "輸": "输",
-        "入": "入",
-        "顯": "显",
-        "隱": "隐",
-        "藏": "藏",
-        "測": "测",
-        "試": "试",
-        "錯": "错",
-        "誤": "误",
-        "確": "确",
-        "認": "认",
-        "聽": "听",
-        "聖": "圣",
-        "飯": "饭",
-        "飲": "饮",
-        "頭": "头",
-        "風": "风",
-        "飛": "飞",
-        "馬": "马",
-        "魚": "鱼",
-        "鳥": "鸟",
-        "愛": "爱",
-        "帶": "带",
-        "無": "无",
-        "萬": "万",
-        "長": "长",
-        "門": "门",
-        "問": "问",
-        "聞": "闻",
-        "陳": "陈",
-        "隊": "队",
-        "陽": "阳",
-        "陰": "阴",
-        "難": "难",
-        "雖": "虽",
-        "雙": "双",
-        "邊": "边",
-        "過": "过",
-        "進": "进",
-        "運": "运",
-        "連": "连",
-        "週": "周",
-        "達": "达",
-        "遲": "迟",
-        "醫": "医",
-        "錢": "钱",
-        "銀": "银",
-        "銷": "销",
-        "錄": "录",
-        "鐵": "铁",
-        "車": "车",
-        "輕": "轻",
-        "轉": "转",
-        "較": "较",
-        "辦": "办",
-        "農": "农",
-        "讀": "读",
-        "誰": "谁",
-        "課": "课",
-        "請": "请",
-        "諾": "诺",
-        "變": "变",
-        "豐": "丰",
-        "貝": "贝",
-        "負": "负",
-        "費": "费",
-        "貿": "贸",
-        "資": "资",
-        "賽": "赛",
-        "贏": "赢",
-        "趕": "赶",
-        "趨": "趋",
-        "跡": "迹",
-        "踐": "践",
-        "身": "身",
-        "軟": "软",
-        "軍": "军",
-        "員": "员",
-        "圓": "圆",
-        "園": "园",
-        "圖": "图",
-        "團": "团",
-        "執": "执",
-        "堅": "坚",
-        "場": "场",
-        "報": "报",
-        "壓": "压",
-        "壞": "坏",
-        "聲": "声",
-        "壹": "壹",
-        "夠": "够",
-        "夢": "梦",
-        "夥": "伙",
-        "獎": "奖",
-        "奧": "奥",
-        "婦": "妇",
-        "嬰": "婴",
-        "孫": "孙",
-        "寶": "宝",
-        "實": "实",
-        "寧": "宁",
-        "寬": "宽",
-        "寫": "写",
-        "尋": "寻",
-        "將": "将",
-        "專": "专",
-        "導": "导",
-        "層": "层",
-        "屬": "属",
-        "歲": "岁",
-        "島": "岛",
-        "嶺": "岭",
-        "幣": "币",
-        "幫": "帮",
-        "幹": "干",
-        "幾": "几",
-        "庫": "库",
-        "廠": "厂",
-        "廣": "广",
-        "廳": "厅",
-        "張": "张",
-        "強": "强",
-        "彈": "弹",
-        "彎": "弯",
-        "彙": "汇",
-        "後": "后",
-        "徑": "径",
-        "從": "从",
-        "徠": "徕",
-        "復": "复",
-        "徵": "征",
-        "德": "德",
-        "憶": "忆",
-        "懷": "怀",
-        "態": "态",
-        "慣": "惯",
-        "慮": "虑",
-        "慶": "庆",
-        "憂": "忧",
-        "懼": "惧",
-        "懶": "懒",
-        "戲": "戏",
-        "戶": "户",
-        "拋": "抛",
-        "挾": "挟",
-        "捨": "舍",
-        "掃": "扫",
-        "掙": "挣",
-        "掛": "挂",
-        "採": "采",
-        "揚": "扬",
-        "換": "换",
-        "揮": "挥",
-        "損": "损",
-        "搖": "摇",
-        "搶": "抢",
-        "擁": "拥",
-        "擇": "择",
-        "擊": "击",
-        "擔": "担",
-        "據": "据",
-        "擴": "扩",
-        "擺": "摆",
-        "攝": "摄",
-        "攜": "携",
-        "敵": "敌",
-        "數": "数",
-        "斷": "断",
-        "於": "于",
-        "暫": "暂",
-        "曆": "历",
-        "曉": "晓",
-        "暢": "畅",
-        "機": "机",
-        "條": "条",
-        "來": "来",
-        "東": "东",
-        "極": "极",
-        "構": "构",
-        "標": "标",
-        "樣": "样",
-        "樓": "楼",
-        "樂": "乐",
-        "樹": "树",
-        "橋": "桥",
-        "檢": "检",
-        "權": "权",
-        "歡": "欢",
-        "歐": "欧",
-        "歲": "岁",
-        "歷": "历",
-        "歸": "归",
-        "殘": "残",
-        "殺": "杀",
-        "殼": "壳",
-        "氣": "气",
-        "漢": "汉",
-        "湯": "汤",
-        "溫": "温",
-        "滅": "灭",
-        "滾": "滚",
-        "滿": "满",
-        "漁": "渔",
-        "漢": "汉",
-        "潔": "洁",
-        "潛": "潜",
-        "潤": "润",
-        "澤": "泽",
-        "濃": "浓",
-        "濟": "济",
-        "濤": "涛",
-        "濫": "滥",
-        "灣": "湾",
-        "燈": "灯",
-        "靈": "灵",
-        "爐": "炉",
-        "爭": "争",
-        "爺": "爷",
-        "牆": "墙",
-        "牽": "牵",
-        "狀": "状",
-        "獨": "独",
-        "獲": "获",
-        "環": "环",
-        "現": "现",
-        "產": "产",
-        "畢": "毕",
-        "畫": "画",
-        "當": "当",
-        "疇": "畴",
-        "療": "疗",
-        "癡": "痴",
-        "盜": "盗",
-        "盡": "尽",
-        "監": "监",
-        "盤": "盘",
-        "著": "着",
-        "眾": "众",
-        "睜": "睁",
-        "矯": "矫",
-        "礎": "础",
-        "禮": "礼",
-        "禱": "祷",
-        "離": "离",
-        "種": "种",
-        "積": "积",
-        "穩": "稳",
-        "窮": "穷",
-        "竅": "窍",
-        "筆": "笔",
-        "節": "节",
-        "範": "范",
-        "簡": "简",
-        "籃": "篮",
-        "糧": "粮",
-        "糾": "纠",
-        "紀": "纪",
-        "約": "约",
-        "紅": "红",
-        "紋": "纹",
-        "納": "纳",
-        "紐": "纽",
-        "純": "纯",
-        "紙": "纸",
-        "級": "级",
-        "細": "细",
-        "終": "终",
-        "組": "组",
-        "結": "结",
-        "絕": "绝",
-        "統": "统",
-        "絲": "丝",
-        "經": "经",
-        "綠": "绿",
-        "維": "维",
-        "網": "网",
-        "緊": "紧",
-        "線": "线",
-        "練": "练",
-        "縣": "县",
-        "總": "总",
-        "績": "绩",
-        "織": "织",
-        "繼": "继",
-        "續": "续",
-        "缺": "缺",
-        "罷": "罢",
-        "羅": "罗",
-        "罰": "罚",
-        "聰": "聪",
-        "聯": "联",
-        "職": "职",
-        "聽": "听",
-        "肅": "肃",
-        "脫": "脱",
-        "腎": "肾",
-        "腳": "脚",
-        "腦": "脑",
-        "臉": "脸",
-        "臟": "脏",
-        "舉": "举",
-        "舊": "旧",
-        "艱": "艰",
-        "藝": "艺",
-        "蘇": "苏",
-        "處": "处",
-        "虛": "虚",
-        "號": "号",
-        "蟲": "虫",
-        "衛": "卫",
-        "衝": "冲",
-        "製": "制",
-        "複": "复",
-        "褲": "裤",
-        "親": "亲",
-        "覺": "觉",
-        "觀": "观",
-        "規": "规",
-        "視": "视",
-        "覽": "览",
-        "觸": "触",
-        "訂": "订",
-        "訓": "训",
-        "記": "记",
-        "註": "注",
-        "詩": "诗",
-        "試": "试",
-        "話": "话",
-        "該": "该",
-        "詳": "详",
-        "誇": "夸",
-        "誌": "志",
-        "語": "语",
-        "誠": "诚",
-        "誤": "误",
-        "說": "说",
-        "讀": "读",
-        "變": "变",
-        "讓": "让",
-        "讚": "赞",
-        "館": "馆",
-        "嗎": "吗",
-        "猶": "犹",
-    }
-)
-
-STATUS_NEW = "new"
-STATUS_LEARNED = "learned"
-STATUS_WRONG = "wrong"
-
-PROMPT_CHINESE = "chinese"
-PROMPT_AUDIO = "audio"
-PROMPT_MIXED = "mixed"
-PROMPT_CLOZE = "cloze"
-PROMPT_MODES = {PROMPT_CHINESE, PROMPT_AUDIO, PROMPT_MIXED, PROMPT_CLOZE}
-CLOZE_SCOPE_WITH = "with"
-CLOZE_SCOPE_ONLY = "only"
-CLOZE_SCOPES = {CLOZE_SCOPE_WITH, CLOZE_SCOPE_ONLY}
-LIBRARY_PAGE_SIZE = 100
-DEFAULT_REVIEW_TARGET_COUNT = 3
-MIN_REVIEW_TARGET_COUNT = 3
-MAX_REVIEW_TARGET_COUNT = 10
-DEFAULT_WRONG_REVIEW_TARGET_COUNT = 3
-MIN_WRONG_REVIEW_TARGET_COUNT = 3
-MAX_WRONG_REVIEW_TARGET_COUNT = 10
-REVIEW_INTERVAL_DAYS = [1, 2, 4, 7, 15, 30, 60, 120, 180, 365]
-SORT_FREQUENCY = "frequency"
-SORT_ALPHA = "alpha"
-LIBRARY_SORT_MODES = {SORT_FREQUENCY, SORT_ALPHA}
-CLOZE_IRREGULAR_FORMS = {
-    "be": {"am", "is", "are", "was", "were", "been", "being"},
-    "go": {"goes", "went", "gone", "going"},
-    "do": {"does", "did", "done", "doing"},
-    "have": {"has", "had", "having"},
-    "make": {"makes", "made", "making"},
-    "take": {"takes", "took", "taken", "taking"},
-    "get": {"gets", "got", "gotten", "getting"},
-    "give": {"gives", "gave", "given", "giving"},
-    "write": {"writes", "wrote", "written", "writing"},
-    "speak": {"speaks", "spoke", "spoken", "speaking"},
-    "see": {"sees", "saw", "seen", "seeing"},
-    "come": {"comes", "came", "coming"},
-    "run": {"runs", "ran", "running"},
-    "begin": {"begins", "began", "begun", "beginning"},
-}
-PART_OF_SPEECH_OPTIONS = [
-    ("n", "n. noun"),
-    ("v", "v. verb"),
-    ("adj", "adj. adjective"),
-    ("adv", "adv. adverb"),
-    ("pron", "pron. pronoun"),
-    ("prep", "prep. preposition"),
-    ("conj", "conj. conjunction"),
-    ("interj", "interj. interjection"),
-    ("abbr", "abbr. abbreviation"),
-    ("num", "num. numeral"),
-    ("aux", "aux. auxiliary"),
-    ("pref", "pref. prefix"),
-    ("suf", "suf. suffix"),
-    ("phrase", "phrase"),
-]
-ECDICT_PRESET_LIBRARIES = {
-    "zk": {"name": "中考", "tags": {"zk"}},
-    "gk": {"name": "高考", "tags": {"gk"}},
-    "cet4": {"name": "CET4", "tags": {"cet4"}},
-    "cet6": {"name": "CET6", "tags": {"cet6"}},
-    "kaoyan": {"name": "考研", "tags": {"ky", "kaoyan"}},
-    "ielts": {"name": "IELTS", "tags": {"ielts"}},
-    "toefl": {"name": "TOEFL", "tags": {"toefl"}},
-    "gre": {"name": "GRE", "tags": {"gre"}},
-}
-ECDICT_POS_MAP = {
-    "n": "n",
-    "noun": "n",
-    "pl": "n",
-    "plural": "n",
-    "v": "v",
-    "vi": "v",
-    "vt": "v",
-    "verb": "v",
-    "a": "adj",
-    "adj": "adj",
-    "adjective": "adj",
-    "s": "adj",
-    "ad": "adv",
-    "adv": "adv",
-    "adverb": "adv",
-    "pron": "pron",
-    "pronoun": "pron",
-    "prep": "prep",
-    "preposition": "prep",
-    "conj": "conj",
-    "conjunction": "conj",
-    "int": "interj",
-    "interj": "interj",
-    "interjection": "interj",
-    "abbr": "abbr",
-    "num": "num",
-    "aux": "aux",
-    "pref": "pref",
-    "prefix": "pref",
-    "suf": "suf",
-    "suff": "suf",
-    "suffix": "suf",
-    "phr": "phrase",
-    "phrase": "phrase",
-}
-ECDICT_POS_PREFIX_RE = re.compile(r"^\s*([A-Za-z][A-Za-z-]*)\.\s*(.*)$")
-ECDICT_DEFINITION_SPLIT_RE = re.compile(r"\s+(?=(?:n|v|s|a|r|adj|adv)\.\s)")
-ECDICT_DEFINITION_POS_RE = re.compile(
-    r"^\s*(n|v|a|s|r|adj|adv|noun|verb|adjective|adverb)\.?\s+",
-    re.IGNORECASE,
-)
-BLOCKED_EXAMPLE_WORDS = {
-    "shit",
-    "bullshit",
-    "fuck",
-    "fucking",
-    "fucker",
-    "motherfucker",
-    "bitch",
-    "bastard",
-    "asshole",
-    "damn",
-}
-
-
+WIKTIONARY_SCHEMA_VERSION = 8
+APP_SCHEMA_VERSION = 5
+PREBUILT_LEXICON_PATH = RESOURCE_DIR / "lexicon" / "typeng-lexicon.sqlite3"
 app = Flask(
     __name__,
     template_folder=str(APP_ROOT / "templates"),
     static_folder=str(APP_ROOT / "static"),
 )
 app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024
-OPENCC_T2S = OpenCC("t2s") if OpenCC is not None else None
+if not getattr(sys, "frozen", False):
+    # Source development is collaborative and templates/styles change often.
+    # Avoid serving a cached template together with newer CSS from disk.
+    app.config["TEMPLATES_AUTO_RELOAD"] = True
+    app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 DB_INITIALIZED = False
 DB_INIT_LOCK = threading.Lock()
+register_request_timing(app)
+app.add_template_filter(definition_lines, "definition_lines")
+app.add_template_filter(definition_items, "definition_items")
+app.add_template_filter(display_pos_label, "display_pos_label")
 
 
-def load_secret_key() -> str:
-    """Persist a per-installation random secret key under data/."""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    path = DATA_DIR / "secret_key"
-    try:
-        value = path.read_text(encoding="utf-8").strip()
-        if value:
-            return value
-    except OSError:
-        pass
-    value = secrets.token_hex(32)
-    try:
-        path.write_text(value, encoding="utf-8")
-    except OSError:
-        pass
-    return value
-
-
-app.config["SECRET_KEY"] = os.environ.get("TYPENG_SECRET_KEY") or load_secret_key()
-
-
-def is_local_host(host_or_origin: str | None) -> bool:
-    value = (host_or_origin or "").strip()
-    if not value:
-        return False
-    if "://" not in value:
-        value = f"http://{value}"
-    try:
-        hostname = urlsplit(value).hostname or ""
-    except ValueError:
-        return False
-    return hostname.lower() in {"127.0.0.1", "localhost", "::1"}
-
-
-def is_local_origin(origin: str | None) -> bool:
-    if not origin or origin == "null":
-        return False
-    return is_local_host(origin)
+app.config["SECRET_KEY"] = os.environ.get("TYPENG_SECRET_KEY") or load_or_create_secret(DATA_DIR)
 
 
 @app.before_request
@@ -758,11 +117,56 @@ def protect_local_app() -> None:
 
 def get_db() -> sqlite3.Connection:
     if "db" not in g:
-        DATA_DIR.mkdir(exist_ok=True)
-        g.db = sqlite3.connect(DB_PATH)
-        g.db.row_factory = sqlite3.Row
-        g.db.execute("PRAGMA foreign_keys = ON")
+        g.db = connect_db(DB_PATH)
     return g.db
+
+
+# Compatibility names keep extensions and the existing test suite stable while
+# schema ownership lives in typeng.schema.
+table_columns = _schema.table_columns
+merge_verb_part_duplicates = _schema.merge_verb_part_duplicates
+migrate_plural_phrase_entries = _schema.migrate_plural_phrase_entries
+update_word_part_preserving_duplicate = _schema.update_word_part_preserving_duplicate
+migrate_inferred_phrase_entries = _schema.migrate_inferred_phrase_entries
+ensure_metadata_table = _schema.ensure_metadata_table
+clear_invalid_example_sentences = _schema.clear_invalid_example_sentences
+simplify_existing_example_translations = _schema.simplify_existing_example_translations
+
+
+def migrate_db(db: sqlite3.Connection) -> None:
+    _schema.migrate_db(db, APP_SCHEMA_VERSION)
+
+
+def init_db() -> None:
+    _schema.initialize(get_db(), PREBUILT_LEXICON_PATH, APP_SCHEMA_VERSION)
+    ensure_efllex_index(get_db(), EFLLEx_PATH)
+    ensure_wiktionary_exam_pos_index(get_db(), WIKTIONARY_EXAM_POS_PATH)
+
+
+_wiktionary.configure(
+    db_provider=lambda: get_db(),
+    path_provider=lambda: wiktionary_jsonl_path(),
+    signature_provider=lambda: wiktionary_source_signature(),
+    available_provider=lambda: wiktionary_lookup_available(),
+)
+ensure_wiktionary_lookup_index = _wiktionary.ensure_wiktionary_lookup_index
+ranked_wiktionary_example_candidates = _wiktionary.ranked_wiktionary_example_candidates
+lookup_wiktionary_example = _wiktionary.lookup_wiktionary_example
+lookup_wiktionary_definition = _wiktionary.lookup_wiktionary_definition
+load_ecdict_data = _ecdict.load_ecdict_data
+_ecdict.configure(
+    db_provider=lambda: get_db(),
+    bundled_path_provider=lambda: BUNDLED_ECDICT_PATH,
+    cache_path_provider=lambda: ECDICT_CACHE_PATH,
+    data_dir_provider=lambda: DATA_DIR,
+    source_url_provider=lambda: ECDICT_SOURCE_URL,
+    schema_provider=lambda: ECDICT_LOOKUP_SCHEMA_VERSION,
+    loader_provider=lambda: load_ecdict_data(),
+)
+ecdict_entries_for_word = _ecdict.ecdict_entries_for_word
+ecdict_source_signature = _ecdict.ecdict_source_signature
+ensure_ecdict_lookup_index = _ecdict.ensure_ecdict_lookup_index
+lookup_ecdict_word = _ecdict.lookup_ecdict_word
 
 
 @app.teardown_appcontext
@@ -772,513 +176,36 @@ def close_db(_: object) -> None:
         db.close()
 
 
-DEFINITION_DISPLAY_POS_RE = re.compile(
-    r"\s*[;；]\s*(?=(?:n|v|adj|adv|pron|prep|conj|interj|abbr|num|aux|phrase)\.\s)",
-    re.IGNORECASE,
-)
 
 
-def display_pos_label(part_of_speech: str | None) -> str:
-    part = normalize_part_group(str(part_of_speech or ""))
-    return {
-        "n": "n.",
-        "v": "v.",
-        "adj": "adj.",
-        "adv": "adv.",
-        "pron": "pron.",
-        "prep": "prep.",
-        "conj": "conj.",
-        "interj": "interj.",
-        "abbr": "abbr.",
-        "num": "num.",
-        "aux": "aux.",
-        "pref": "pref.",
-        "suf": "suf.",
-        "phrase": "phrase.",
-    }.get(part, f"{part}.") if part else ""
 
 
-@app.template_filter("definition_lines")
-def definition_lines(value: str | None, part_of_speech: str | None = None) -> str:
-    lines: list[str] = []
-    for raw_line in (value or "").replace("\\n", "\n").splitlines():
-        line = re.sub(r"\s+", " ", raw_line).strip()
-        if not line:
-            continue
-        parts = [part.strip() for part in DEFINITION_DISPLAY_POS_RE.split(line) if part.strip()]
-        lines.extend(parts or [line])
-    label = display_pos_label(part_of_speech)
-    if label:
-        prefixed: list[str] = []
-        for line in lines:
-            if re.match(r"^(?:n|v|adj|adv|pron|prep|conj|interj|abbr|num|aux|pref|suf|phrase)\.\s", line, re.IGNORECASE):
-                prefixed.append(line)
-            else:
-                prefixed.append(f"{label} {line}")
-        lines = prefixed
-    return "\n".join(lines)
 
 
-def table_columns(db: sqlite3.Connection, table_name: str) -> set[str]:
-    return {row["name"] for row in db.execute(f"PRAGMA table_info({table_name})").fetchall()}
 
 
-def normalize_user_pos(raw_pos: str) -> str:
-    normalized = normalize_ecdict_pos(raw_pos)
-    return "v" if normalized in {"vi", "vt", "verb"} else normalized
 
 
-def merge_text_values(*values: str | None) -> str | None:
-    seen: set[str] = set()
-    merged: list[str] = []
-    for value in values:
-        for part in re.split(r"[；;\n]+", value or ""):
-            cleaned = part.strip()
-            if cleaned and cleaned not in seen:
-                seen.add(cleaned)
-                merged.append(cleaned)
-    return "；".join(merged) if merged else None
 
 
-def merge_verb_part_duplicates(db: sqlite3.Connection) -> None:
-    rows = db.execute(
-        """
-        SELECT *
-        FROM words
-        WHERE part_of_speech IN ('vi', 'vt', 'verb', 'v')
-        ORDER BY library_id ASC, lower(word) ASC, id ASC
-        """
-    ).fetchall()
-    groups: dict[tuple[int, str], list[sqlite3.Row]] = {}
-    for row in rows:
-        groups.setdefault((int(row["library_id"]), str(row["word"]).lower()), []).append(row)
-
-    status_rank = {STATUS_NEW: 0, STATUS_LEARNED: 1, STATUS_WRONG: 2}
-    for (library_id, _word_key), group in groups.items():
-        if not group:
-            continue
-        target = next((row for row in group if row["part_of_speech"] == "v"), group[0])
-        duplicate_rows = [row for row in group if int(row["id"]) != int(target["id"])]
-        if not duplicate_rows and target["part_of_speech"] == "v":
-            continue
-
-        all_rows = [target, *duplicate_rows]
-        best_status = max((row["status"] for row in all_rows), key=lambda status: status_rank.get(status, 0))
-        meaning = merge_text_values(*(row["meaning"] for row in all_rows)) or target["meaning"]
-        definition = merge_text_values(*(row["definition"] for row in all_rows))
-        source_tags = merge_text_values(*(row["source_tags"] for row in all_rows))
-        example_row = next((row for row in all_rows if row["example_sentence"]), target)
-        phonetic_row = next((row for row in all_rows if row["phonetic"]), target)
-        source_row = next((row for row in all_rows if row["source"]), target)
-        frequency_values = [int(row["frequency"]) for row in all_rows if row["frequency"] is not None]
-        frequency = min(frequency_values) if frequency_values else None
-        wrong_correct_count = max(int(row["wrong_correct_count"]) for row in all_rows)
-        review_correct_count = max(int(row["review_correct_count"]) for row in all_rows)
-        review_stage = max(int(row["review_stage"]) for row in all_rows)
-        total_attempts = sum(int(row["total_attempts"]) for row in all_rows)
-        correct_attempts = sum(int(row["correct_attempts"]) for row in all_rows)
-        wrong_next_review_at = min((row["wrong_next_review_at"] for row in all_rows if row["wrong_next_review_at"]), default=None)
-        next_review_at = min((row["next_review_at"] for row in all_rows if row["next_review_at"]), default=None)
-        last_reviewed_at = max((row["last_reviewed_at"] for row in all_rows if row["last_reviewed_at"]), default=None)
-
-        try:
-            db.execute(
-                """
-                UPDATE words
-                SET part_of_speech = ?,
-                    meaning = ?,
-                    example_sentence = ?,
-                    example_translation = ?,
-                    phonetic = ?,
-                    definition = ?,
-                    frequency = ?,
-                    source = ?,
-                    source_tags = ?,
-                    status = ?,
-                    wrong_correct_count = ?,
-                    wrong_next_review_at = ?,
-                    review_correct_count = ?,
-                    review_stage = ?,
-                    next_review_at = ?,
-                    last_reviewed_at = ?,
-                    total_attempts = ?,
-                    correct_attempts = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ? AND library_id = ?
-                """,
-                (
-                    "v",
-                    meaning,
-                    example_row["example_sentence"],
-                    example_row["example_translation"],
-                    phonetic_row["phonetic"],
-                    definition,
-                    frequency,
-                    source_row["source"],
-                    source_tags,
-                    best_status,
-                    wrong_correct_count,
-                    wrong_next_review_at,
-                    review_correct_count,
-                    review_stage,
-                    next_review_at,
-                    last_reviewed_at,
-                    total_attempts,
-                    correct_attempts,
-                    target["id"],
-                    library_id,
-                ),
-            )
-        except sqlite3.IntegrityError:
-            existing = db.execute(
-                """
-                SELECT *
-                FROM words
-                WHERE library_id = ? AND lower(word) = lower(?) AND part_of_speech = 'v'
-                """,
-                (library_id, target["word"]),
-            ).fetchone()
-            if existing and int(existing["id"]) != int(target["id"]):
-                duplicate_rows.append(target)
-                target = existing
-                db.execute(
-                    """
-                    UPDATE words
-                    SET meaning = ?,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ? AND library_id = ?
-                    """,
-                    (merge_text_values(existing["meaning"], meaning) or meaning, existing["id"], library_id),
-                )
-
-        duplicate_ids = [int(row["id"]) for row in duplicate_rows]
-        if duplicate_ids:
-            placeholders = ",".join("?" for _ in duplicate_ids)
-            db.execute(
-                f"""
-                DELETE FROM words
-                WHERE library_id = ? AND id IN ({placeholders})
-                """,
-                [library_id, *duplicate_ids],
-            )
 
 
-def migrate_plural_phrase_entries(db: sqlite3.Connection) -> None:
-    rows = db.execute(
-        """
-        SELECT *
-        FROM words
-        WHERE part_of_speech = 'phrase'
-          AND lower(trim(meaning)) LIKE 'pl.%'
-        ORDER BY library_id ASC, lower(word) ASC, id ASC
-        """
-    ).fetchall()
-    for row in rows:
-        existing = db.execute(
-            """
-            SELECT *
-            FROM words
-            WHERE library_id = ?
-              AND lower(word) = lower(?)
-              AND part_of_speech = 'n'
-              AND id != ?
-            """,
-            (row["library_id"], row["word"], row["id"]),
-        ).fetchone()
-        if existing:
-            merged_meaning = merge_text_values(existing["meaning"], row["meaning"]) or existing["meaning"]
-            db.execute(
-                """
-                UPDATE words
-                SET meaning = ?,
-                    example_sentence = COALESCE(example_sentence, ?),
-                    example_translation = COALESCE(example_translation, ?),
-                    phonetic = COALESCE(phonetic, ?),
-                    definition = COALESCE(definition, ?),
-                    frequency = COALESCE(frequency, ?),
-                    source = COALESCE(source, ?),
-                    source_tags = COALESCE(source_tags, ?),
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ? AND library_id = ?
-                """,
-                (
-                    merged_meaning,
-                    row["example_sentence"],
-                    row["example_translation"],
-                    row["phonetic"],
-                    row["definition"],
-                    row["frequency"],
-                    row["source"],
-                    row["source_tags"],
-                    existing["id"],
-                    existing["library_id"],
-                ),
-            )
-            db.execute("DELETE FROM words WHERE id = ? AND library_id = ?", (row["id"], row["library_id"]))
-        else:
-            db.execute(
-                """
-                UPDATE words
-                SET part_of_speech = 'n',
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ? AND library_id = ?
-                """,
-                (row["id"], row["library_id"]),
-            )
 
 
-def update_word_part_preserving_duplicate(db: sqlite3.Connection, row: sqlite3.Row, target_part: str) -> None:
-    existing = db.execute(
-        """
-        SELECT *
-        FROM words
-        WHERE library_id = ?
-          AND lower(word) = lower(?)
-          AND part_of_speech = ?
-          AND id != ?
-        """,
-        (row["library_id"], row["word"], target_part, row["id"]),
-    ).fetchone()
-    if existing:
-        merged_meaning = merge_text_values(existing["meaning"], row["meaning"]) or existing["meaning"]
-        db.execute(
-            """
-            UPDATE words
-            SET meaning = ?,
-                example_sentence = COALESCE(example_sentence, ?),
-                example_translation = COALESCE(example_translation, ?),
-                phonetic = COALESCE(phonetic, ?),
-                definition = COALESCE(definition, ?),
-                frequency = COALESCE(frequency, ?),
-                source = COALESCE(source, ?),
-                source_tags = COALESCE(source_tags, ?),
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = ? AND library_id = ?
-            """,
-            (
-                merged_meaning,
-                row["example_sentence"],
-                row["example_translation"],
-                row["phonetic"],
-                row["definition"],
-                row["frequency"],
-                row["source"],
-                row["source_tags"],
-                existing["id"],
-                existing["library_id"],
-            ),
-        )
-        db.execute("DELETE FROM words WHERE id = ? AND library_id = ?", (row["id"], row["library_id"]))
-    else:
-        db.execute(
-            """
-            UPDATE words
-            SET part_of_speech = ?,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = ? AND library_id = ?
-            """,
-            (target_part, row["id"], row["library_id"]),
-        )
 
 
-def migrate_inferred_phrase_entries(db: sqlite3.Connection) -> None:
-    rows = db.execute(
-        """
-        SELECT *
-        FROM words
-        WHERE part_of_speech = 'phrase'
-          AND instr(trim(word), ' ') = 0
-        ORDER BY library_id ASC, lower(word) ASC, id ASC
-        """
-    ).fetchall()
-    for row in rows:
-        inferred = infer_pos_from_ecdict_definition(row["definition"] or "")
-        if not inferred:
-            inferred = infer_pos_from_word_shape(row["word"] or "", row["meaning"] or "")
-        if inferred and inferred != "phrase":
-            update_word_part_preserving_duplicate(db, row, inferred)
 
 
-def migrate_db(db: sqlite3.Connection) -> None:
-    db.execute(
-        """
-        INSERT OR IGNORE INTO libraries (id, name)
-        VALUES (1, 'Default Library')
-        """
-    )
-
-    library_columns = table_columns(db, "libraries")
-    if "review_target_count" not in library_columns:
-        db.execute(
-            f"ALTER TABLE libraries ADD COLUMN review_target_count INTEGER NOT NULL DEFAULT {DEFAULT_REVIEW_TARGET_COUNT}"
-        )
-    if "wrong_review_target_count" not in library_columns:
-        db.execute(
-            f"ALTER TABLE libraries ADD COLUMN wrong_review_target_count INTEGER NOT NULL DEFAULT {DEFAULT_WRONG_REVIEW_TARGET_COUNT}"
-        )
-
-    columns = table_columns(db, "words")
-    if "library_id" not in columns:
-        db.execute("ALTER TABLE words RENAME TO words_legacy")
-        db.execute(
-            """
-            CREATE TABLE words (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                library_id INTEGER NOT NULL DEFAULT 1,
-                word TEXT NOT NULL,
-                part_of_speech TEXT NOT NULL,
-                meaning TEXT NOT NULL,
-                example_sentence TEXT,
-                example_translation TEXT,
-                phonetic TEXT,
-                definition TEXT,
-                frequency INTEGER,
-                source TEXT,
-                source_tags TEXT,
-                status TEXT NOT NULL DEFAULT 'new',
-                wrong_correct_count INTEGER NOT NULL DEFAULT 0,
-                wrong_next_review_at TEXT,
-                review_correct_count INTEGER NOT NULL DEFAULT 0,
-                review_stage INTEGER NOT NULL DEFAULT 0,
-                next_review_at TEXT,
-                last_reviewed_at TEXT,
-                total_attempts INTEGER NOT NULL DEFAULT 0,
-                correct_attempts INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(library_id, word, part_of_speech),
-                FOREIGN KEY(library_id) REFERENCES libraries(id) ON DELETE CASCADE
-            )
-            """
-        )
-        db.execute(
-            """
-            INSERT INTO words (
-                id, library_id, word, part_of_speech, meaning, status,
-                wrong_correct_count, total_attempts, correct_attempts,
-                created_at, updated_at
-            )
-            SELECT
-                id, 1, word, part_of_speech, meaning, status,
-                wrong_correct_count, total_attempts, correct_attempts,
-                created_at, updated_at
-            FROM words_legacy
-            """
-        )
-        db.execute("DROP TABLE words_legacy")
-        columns = table_columns(db, "words")
-
-    for column_name, column_sql in {
-        "phonetic": "ALTER TABLE words ADD COLUMN phonetic TEXT",
-        "example_sentence": "ALTER TABLE words ADD COLUMN example_sentence TEXT",
-        "example_translation": "ALTER TABLE words ADD COLUMN example_translation TEXT",
-        "definition": "ALTER TABLE words ADD COLUMN definition TEXT",
-        "frequency": "ALTER TABLE words ADD COLUMN frequency INTEGER",
-        "source": "ALTER TABLE words ADD COLUMN source TEXT",
-        "source_tags": "ALTER TABLE words ADD COLUMN source_tags TEXT",
-        "wrong_next_review_at": "ALTER TABLE words ADD COLUMN wrong_next_review_at TEXT",
-        "review_correct_count": "ALTER TABLE words ADD COLUMN review_correct_count INTEGER NOT NULL DEFAULT 0",
-        "review_stage": "ALTER TABLE words ADD COLUMN review_stage INTEGER NOT NULL DEFAULT 0",
-        "next_review_at": "ALTER TABLE words ADD COLUMN next_review_at TEXT",
-        "last_reviewed_at": "ALTER TABLE words ADD COLUMN last_reviewed_at TEXT",
-        "example_note": "ALTER TABLE words ADD COLUMN example_note TEXT",
-    }.items():
-        if column_name not in columns:
-            db.execute(column_sql)
-
-    db.execute(
-        """
-        UPDATE words
-        SET next_review_at = ?
-        WHERE status = ?
-          AND next_review_at IS NULL
-          AND review_correct_count = 0
-        """,
-        (next_review_date(0), STATUS_LEARNED),
-    )
-    db.execute(
-        """
-        UPDATE words
-        SET wrong_next_review_at = ?
-        WHERE status = ?
-          AND wrong_next_review_at IS NULL
-        """,
-        (next_review_date(0), STATUS_WRONG),
-    )
-    clear_invalid_example_sentences(db)
-    simplify_existing_example_translations(db)
-    merge_verb_part_duplicates(db)
-    migrate_plural_phrase_entries(db)
-    migrate_inferred_phrase_entries(db)
 
 
-def ensure_metadata_table(db: sqlite3.Connection) -> None:
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS metadata (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL
-        )
-        """
-    )
 
 
-def init_db() -> None:
-    db = get_db()
-    ensure_metadata_table(db)
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS libraries (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
-            review_target_count INTEGER NOT NULL DEFAULT 3,
-            wrong_review_target_count INTEGER NOT NULL DEFAULT 3,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS words (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            library_id INTEGER NOT NULL DEFAULT 1,
-            word TEXT NOT NULL,
-            part_of_speech TEXT NOT NULL,
-            meaning TEXT NOT NULL,
-            example_sentence TEXT,
-            example_translation TEXT,
-            example_note TEXT,
-            phonetic TEXT,
-            definition TEXT,
-            frequency INTEGER,
-            source TEXT,
-            source_tags TEXT,
-            status TEXT NOT NULL DEFAULT 'new',
-            wrong_correct_count INTEGER NOT NULL DEFAULT 0,
-            wrong_next_review_at TEXT,
-            review_correct_count INTEGER NOT NULL DEFAULT 0,
-            review_stage INTEGER NOT NULL DEFAULT 0,
-            next_review_at TEXT,
-            last_reviewed_at TEXT,
-            total_attempts INTEGER NOT NULL DEFAULT 0,
-            correct_attempts INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(library_id, word, part_of_speech),
-            FOREIGN KEY(library_id) REFERENCES libraries(id) ON DELETE CASCADE
-        )
-        """
-    )
-    migrate_db(db)
-    db.commit()
 
 
 @app.before_request
 def ensure_db() -> None:
-    # init_db() runs schema migrations plus several full-table cleanup scans.
-    # Running it on every request makes large libraries increasingly slow, so
-    # run it once per process instead.
+    # Schema checks run once per process. Versioned data migrations themselves
+    # run once per database version, not once per application launch.
     global DB_INITIALIZED
     if DB_INITIALIZED:
         return
@@ -1289,16 +216,7 @@ def ensure_db() -> None:
 
 
 def count_words(status: str | None = None) -> int:
-    db = get_db()
-    library_id = get_active_library_id()
-    if status is None:
-        row = db.execute("SELECT COUNT(*) AS count FROM words WHERE library_id = ?", (library_id,)).fetchone()
-    else:
-        row = db.execute(
-            "SELECT COUNT(*) AS count FROM words WHERE library_id = ? AND status = ?",
-            (library_id, status),
-        ).fetchone()
-    return int(row["count"])
+    return word_repository.count(get_db(), get_active_library_id(), status)
 
 
 def now_iso() -> str:
@@ -1310,20 +228,10 @@ def today_iso() -> str:
 
 
 def review_due_count() -> int:
-    row = get_db().execute(
-        """
-        SELECT COUNT(*) AS count
-        FROM words
-        JOIN libraries ON libraries.id = words.library_id
-        WHERE words.library_id = ?
-          AND words.status = ?
-          AND words.review_correct_count < libraries.review_target_count
-          AND words.next_review_at IS NOT NULL
-          AND date(words.next_review_at) <= ?
-        """,
-        (get_active_library_id(), STATUS_LEARNED, today_iso()),
-    ).fetchone()
-    return int(row["count"])
+    return review_service.due_count(
+        get_db(), get_active_library_id(), STATUS_LEARNED,
+        "next_review_at", today_iso(), require_incomplete_review=True,
+    )
 
 
 def review_scheduled_count() -> int:
@@ -1343,18 +251,10 @@ def review_scheduled_count() -> int:
 
 
 def wrong_due_count() -> int:
-    row = get_db().execute(
-        """
-        SELECT COUNT(*) AS count
-        FROM words
-        WHERE library_id = ?
-          AND status = ?
-          AND wrong_next_review_at IS NOT NULL
-          AND date(wrong_next_review_at) <= ?
-        """,
-        (get_active_library_id(), STATUS_WRONG, today_iso()),
-    ).fetchone()
-    return int(row["count"])
+    return review_service.due_count(
+        get_db(), get_active_library_id(), STATUS_WRONG,
+        "wrong_next_review_at", today_iso(),
+    )
 
 
 def wrong_scheduled_count() -> int:
@@ -1381,257 +281,36 @@ def wrong_review_target_count() -> int:
     return max(MIN_WRONG_REVIEW_TARGET_COUNT, int(library["wrong_review_target_count"]))
 
 
-def next_review_date(stage: int) -> str:
-    index = max(0, min(stage, len(REVIEW_INTERVAL_DAYS) - 1))
-    return (datetime.now().date() + timedelta(days=REVIEW_INTERVAL_DAYS[index])).isoformat()
 
 
-def spelling_variants(word: str) -> set[str]:
-    """Return British/American spelling variants of a word (including itself).
-
-    Wiktionary often keeps example sentences under only one spelling (e.g. all
-    examples live under "judgment", while the "judgement" entry is an empty
-    cross-reference). Generating both spellings lets example lookup find them
-    and lets cloze practice accept either spelling as correct.
-    """
-    base = word.strip().lower()
-    if not base or not re.fullmatch(r"[a-z]+", base):
-        return {base} if base else set()
-
-    variants = {base}
-
-    # Rule-based transforms that hold across many common words. Applied in both
-    # directions so either spelling maps to the other.
-    rules = [
-        # -our / -or : colour/color, honour/honor, favour/favor, behaviour...
-        (r"our\b", "or"),
-        (r"or\b", "our"),
-        # -ise / -ize and -isation / -ization : organise/organize...
-        (r"is(e|ed|es|ing|ation)\b", r"iz\1"),
-        (r"iz(e|ed|es|ing|ation)\b", r"is\1"),
-        # -yse / -yze : analyse/analyze, paralyse/paralyze
-        (r"yse\b", "yze"),
-        (r"yze\b", "yse"),
-        # -re / -er : centre/center, theatre/theater, metre/meter, fibre...
-        (r"([bcdfgtv])re\b", r"\1er"),
-        (r"([bcdfgt])er\b", r"\1re"),
-        # -ce / -se noun forms : defence/defense, offence/offense, licence...
-        (r"ence\b", "ense"),
-        (r"ense\b", "ence"),
-        # judgement / judgment, acknowledgement / acknowledgment, ageing/aging
-        (r"dgement\b", "dgment"),
-        (r"dgment\b", "dgement"),
-        (r"ageing\b", "aging"),
-        (r"aging\b", "ageing"),
-        # doubled-l before suffix : travelled/traveled, cancelled/canceled...
-        (r"ll(ed|ing|er|or)\b", r"l\1"),
-        # -ogue / -og : catalogue/catalog, dialogue/dialog
-        (r"ogue\b", "og"),
-        (r"og\b", "ogue"),
-    ]
-    for pattern, repl in rules:
-        for existing in list(variants):
-            transformed = re.sub(pattern, repl, existing)
-            if transformed != existing and re.fullmatch(r"[a-z]+", transformed):
-                variants.add(transformed)
-
-    return variants
 
 
-def cloze_forms(word: str) -> set[str]:
-    base = word.strip().lower()
-    if not base or not re.fullmatch(r"[a-z]+", base):
-        return {base} if base else set()
-
-    forms = set()
-    for variant in spelling_variants(base):
-        forms |= cloze_inflections(variant)
-    return {form for form in forms if form}
 
 
-def cloze_inflections(word: str) -> set[str]:
-    base = word.strip().lower()
-    if not base or not re.fullmatch(r"[a-z]+", base):
-        return {base} if base else set()
-
-    forms = {base}
-    forms.update(CLOZE_IRREGULAR_FORMS.get(base, set()))
-
-    if base.endswith("y") and len(base) > 1 and base[-2] not in "aeiou":
-        forms.add(f"{base[:-1]}ies")
-        forms.add(f"{base[:-1]}ied")
-    else:
-        if base.endswith(("s", "x", "z", "ch", "sh", "o")):
-            forms.add(f"{base}es")
-        else:
-            forms.add(f"{base}s")
-        forms.add(f"{base}ed")
-
-    if base.endswith("e") and not base.endswith("ee"):
-        forms.add(f"{base}d")
-        forms.add(f"{base[:-1]}ing")
-    else:
-        forms.add(f"{base}ing")
-
-    if len(base) >= 3 and base[-1] not in "aeiouwxy" and base[-2] in "aeiou" and base[-3] not in "aeiou":
-        forms.add(f"{base}{base[-1]}ed")
-        forms.add(f"{base}{base[-1]}ing")
-
-    return {form for form in forms if form}
 
 
-def cloze_match_pattern(word: str) -> re.Pattern[str] | None:
-    forms = sorted(cloze_forms(word), key=len, reverse=True)
-    if not forms:
-        return None
-    alternatives = "|".join(re.escape(form) for form in forms)
-    return re.compile(rf"(?<![A-Za-z'])({alternatives})(?![A-Za-z'])", re.IGNORECASE)
 
 
-def cloze_answer(sentence: str | None, word: str) -> str:
-    sentence = (sentence or "").strip()
-    pattern = cloze_match_pattern(word)
-    if not sentence or pattern is None:
-        return ""
-    match = pattern.search(sentence)
-    return match.group(1) if match else ""
 
 
-def cloze_prompt(sentence: str | None, word: str) -> str:
-    sentence = (sentence or "").strip()
-    if not sentence or not word:
-        return ""
-    pattern = cloze_match_pattern(word)
-    if pattern is None:
-        return ""
-    prompt, replacements = pattern.subn("____", sentence, count=1)
-    return prompt if replacements else ""
 
 
-def truncate_cloze_prompt(prompt: str, max_chars: int = 240) -> str:
-    """Keep ~max_chars of a long cloze prompt centered on the ____ marker.
-
-    Sentences longer than max_chars are accepted into the word bank and shown
-    in full during preview; this function only affects how they appear in the
-    cloze exercise, where a focused window around the target word is clearer
-    than a wall of text.
-    """
-    if len(prompt) <= max_chars:
-        return prompt
-
-    marker = "____"
-    pos = prompt.find(marker)
-    if pos == -1:
-        return prompt[: max_chars - 1] + "…"
-
-    half = (max_chars - len(marker)) // 2
-
-    start = max(0, pos - half)
-    if start > 0:
-        # Align to a word boundary so we don't cut mid-word.
-        space = prompt.find(" ", start)
-        if space != -1 and space < pos:
-            start = space + 1
-
-    end = min(len(prompt), pos + len(marker) + half)
-    if end < len(prompt):
-        # Back up to the previous word boundary.
-        space = prompt.rfind(" ", 0, end)
-        if space != -1 and space > pos + len(marker):
-            end = space
-
-    result = prompt[start:end].strip()
-    if start > 0:
-        result = "…" + result
-    if end < len(prompt):
-        result = result + "…"
-    return result
 
 
-def valid_example_sentence(sentence: str | None, word: str) -> bool:
-    return bool(cloze_prompt(sentence, word))
 
 
-def english_word_count(sentence: str) -> int:
-    return len(re.findall(r"[A-Za-z]+(?:'[A-Za-z]+)?", sentence))
 
 
-def contains_blocked_example_word(sentence: str) -> bool:
-    words = {word.lower() for word in re.findall(r"[A-Za-z]+(?:'[A-Za-z]+)?", sentence)}
-    return bool(words & BLOCKED_EXAMPLE_WORDS)
 
 
-def example_target_position_penalty(sentence: str, word: str) -> int:
-    pattern = cloze_match_pattern(word)
-    if pattern is None:
-        return 3
-    match = pattern.search(sentence)
-    if not match:
-        return 3
-
-    tokens = list(re.finditer(r"[A-Za-z]+(?:'[A-Za-z]+)?", sentence))
-    if len(tokens) < 4:
-        return 2
-
-    target_index = None
-    for index, token in enumerate(tokens):
-        if token.start() <= match.start() < token.end():
-            target_index = index
-            break
-    if target_index is None:
-        return 2
-
-    if target_index == 0 or target_index == len(tokens) - 1:
-        return 3
-    if target_index == 1 or target_index == len(tokens) - 2:
-        return 1
-    return 0
 
 
-def normalize_answer(value: str) -> str:
-    return value.strip()
 
 
-def answer_matches(word: sqlite3.Row, answer: str, prompt_mode: str) -> bool:
-    normalized = normalize_answer(answer)
-    if prompt_mode == PROMPT_CLOZE:
-        accepted = {word["word"], cloze_answer(word["example_sentence"], word["word"])}
-        return normalized.lower() in {item.lower() for item in accepted if item}
-    return normalized == word["word"]
 
 
-def answer_feedback(word: sqlite3.Row, answer: str, is_correct: bool) -> dict[str, object]:
-    return {
-        "correct": is_correct,
-        "answer": answer,
-        "word": word["word"],
-        "part_of_speech": word["part_of_speech"],
-        "meaning": word["meaning"],
-        "example_sentence": word["example_sentence"],
-        "cloze_text": cloze_prompt(word["example_sentence"], word["word"]),
-        "cloze_answer": cloze_answer(word["example_sentence"], word["word"]),
-    }
 
 
-def cloze_form_hint_feedback(word: sqlite3.Row, answer: str, prompt_mode: str) -> dict[str, object] | None:
-    if prompt_mode != PROMPT_CLOZE:
-        return None
-    sentence_form = cloze_answer(word["example_sentence"], word["word"])
-    if not sentence_form:
-        return None
-    normalized_answer = normalize_answer(answer).lower()
-    if normalized_answer != word["word"].lower() or normalized_answer == sentence_form.lower():
-        return None
-    feedback = answer_feedback(word, answer, True)
-    feedback["form_hint"] = True
-    sentence = word["example_sentence"] or ""
-    pattern = cloze_match_pattern(word["word"])
-    match = pattern.search(sentence) if pattern is not None else None
-    if match:
-        feedback["example_before"] = sentence[:match.start()]
-        feedback["example_match"] = sentence[match.start():match.end()]
-        feedback["example_after"] = sentence[match.end():]
-    return feedback
 
 
 def base_prompt_mode_from_form() -> str:
@@ -1683,10 +362,91 @@ def effective_prompt_mode(word: sqlite3.Row) -> str:
     return prompt_mode
 
 
+def example_candidates_for_word(
+    word: sqlite3.Row | dict[str, object], *, include_tagged: bool = False
+) -> list[dict[str, object]]:
+    """Return user examples first, followed by every suitable Wiktionary example."""
+    word_id = int(word["id"])
+    candidates: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for row in example_repository.fetch_user_examples(get_db(), word_id):
+        sentence = str(row["sentence"] or "").strip()
+        if sentence and sentence not in seen and valid_example_sentence(sentence, str(word["word"])):
+            seen.add(sentence)
+            candidates.append({
+                "sentence": sentence,
+                "translation": row["translation"],
+                "note": row["note"],
+                "source": "user",
+                "is_user": True,
+            })
+
+    if wiktionary_lookup_available():
+        for row in ranked_wiktionary_example_candidates(
+            str(word["word"]),
+            str(word["part_of_speech"]),
+            limit=None,
+            include_tagged=include_tagged,
+        ):
+            sentence = str(row["example_sentence"] or "").strip()
+            if not sentence or sentence in seen:
+                continue
+            seen.add(sentence)
+            candidates.append({
+                "sentence": sentence,
+                "translation": None,
+                "note": _lookup_note(row),
+                "definition": row["definition"],
+                "source": "wiktionary",
+                "is_user": False,
+            })
+
+    def value(key: str) -> object | None:
+        try:
+            return word[key]
+        except (IndexError, KeyError):
+            return None
+
+    legacy = str(value("example_sentence") or "").strip()
+    legacy_is_user = value("example_source") == "user"
+    if (
+        legacy
+        and legacy not in seen
+        and valid_example_sentence(legacy, str(word["word"]))
+        and (legacy_is_user or usable_wiktionary_example(legacy, str(word["word"])))
+    ):
+        candidates.insert(0, {
+            "sentence": legacy,
+            "translation": value("example_translation"),
+            "note": value("example_note"),
+            "source": "user" if legacy_is_user else "legacy",
+            "is_user": legacy_is_user,
+        })
+    return candidates
+
+
+def practice_word_with_example(word: sqlite3.Row) -> dict[str, object]:
+    """Choose one stable example for the current question, preferring the user's."""
+    cached = session.get("practice_example") or {}
+    if int(cached.get("word_id", -1)) != int(word["id"]):
+        candidates = example_candidates_for_word(word)
+        user_candidates = [item for item in candidates if item["is_user"]]
+        selected = user_candidates[0] if user_candidates else (random.choice(candidates) if candidates else None)
+        cached = {"word_id": int(word["id"]), **selected} if selected else {"word_id": int(word["id"])}
+        session["practice_example"] = cached
+    result = dict(word)
+    result["example_sentence"] = cached.get("sentence")
+    result["example_translation"] = cached.get("translation")
+    result["example_note"] = cached.get("note")
+    result["example_source"] = cached.get("source")
+    return result
+
+
 def ids_with_cloze(rows: list[sqlite3.Row], limit: int) -> list[int]:
     ids: list[int] = []
     for row in rows:
-        if cloze_prompt(row["example_sentence"], row["word"]):
+        full_word = fetch_word(int(row["id"]))
+        if full_word is not None and example_candidates_for_word(full_word):
             ids.append(int(row["id"]))
             if len(ids) >= limit:
                 break
@@ -1694,11 +454,7 @@ def ids_with_cloze(rows: list[sqlite3.Row], limit: int) -> list[int]:
 
 
 def cloze_ids_from_ids(ids: list[int]) -> list[int]:
-    return [
-        int(row["id"])
-        for row in fetch_words_by_ids(ids)
-        if cloze_prompt(row["example_sentence"], row["word"])
-    ]
+    return [int(row["id"]) for row in fetch_words_by_ids(ids) if example_candidates_for_word(row)]
 
 
 def start_pending_cloze_round() -> bool:
@@ -1719,437 +475,28 @@ def start_pending_cloze_round() -> bool:
     return True
 
 
-def clear_invalid_example_sentences(db: sqlite3.Connection) -> None:
-    rows = db.execute(
-        """
-        SELECT id, word, example_sentence
-        FROM words
-        WHERE example_sentence IS NOT NULL
-          AND trim(example_sentence) != ''
-        """
-    ).fetchall()
-    invalid_ids = [
-        int(row["id"])
-        for row in rows
-        if not valid_example_sentence(row["example_sentence"], row["word"])
-        or contains_blocked_example_word(row["example_sentence"] or "")
-    ]
-    for start in range(0, len(invalid_ids), 500):
-        batch = invalid_ids[start : start + 500]
-        placeholders = ",".join("?" for _ in batch)
-        db.execute(
-            f"""
-            UPDATE words
-            SET example_sentence = NULL,
-                example_note = NULL,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id IN ({placeholders})
-            """,
-            batch,
-        )
 
 
-def simplify_existing_example_translations(db: sqlite3.Connection) -> None:
-    rows = db.execute(
-        """
-        SELECT id, example_translation
-        FROM words
-        WHERE example_translation IS NOT NULL
-          AND trim(example_translation) != ''
-        """
-    ).fetchall()
-    for row in rows:
-        simplified = simplify_chinese(row["example_translation"])
-        if simplified and simplified != row["example_translation"]:
-            db.execute(
-                """
-                UPDATE words
-                SET example_translation = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-                """,
-                (simplified, row["id"]),
-            )
 
 
-def normalize_part_group(part_of_speech: str) -> str:
-    part = normalize_ecdict_pos(part_of_speech)
-    if part in {"vt", "vi"}:
-        return "v"
-    if part in {"noun"}:
-        return "n"
-    if part in {"adjective"}:
-        return "adj"
-    if part in {"adverb"}:
-        return "adv"
-    return part
 
 
-def matched_form_in_sentence(sentence: str, word: str) -> str:
-    pattern = cloze_match_pattern(word)
-    if pattern is None:
-        return ""
-    match = pattern.search(sentence)
-    return match.group(1).lower() if match else ""
 
 
-def sentence_tokens(sentence: str) -> list[str]:
-    return [token.lower() for token in re.findall(r"[A-Za-z]+(?:'[A-Za-z]+)?", sentence)]
 
 
-def first_match_context(sentence: str, word: str) -> tuple[list[str], int]:
-    form = matched_form_in_sentence(sentence, word)
-    if not form:
-        return [], -1
-    tokens = sentence_tokens(sentence)
-    for index, token in enumerate(tokens):
-        if token == form:
-            return tokens, index
-    return tokens, -1
 
 
-def token_after_adverbs(tokens: list[str], index: int) -> str:
-    adverbs = {
-        "only",
-        "also",
-        "still",
-        "just",
-        "really",
-        "probably",
-        "possibly",
-        "easily",
-        "hardly",
-        "never",
-        "always",
-        "simply",
-        "quickly",
-        "actually",
-        "even",
-    }
-    cursor = index + 1
-    while cursor < len(tokens) and tokens[cursor] in adverbs:
-        cursor += 1
-    return tokens[cursor] if cursor < len(tokens) else ""
 
 
-def high_ambiguity_pos_allowed(sentence: str, word: str, part_of_speech: str) -> bool:
-    group = normalize_part_group(part_of_speech)
-    base = word.lower()
-    tokens, index = first_match_context(sentence, word)
-    if index < 0:
-        return False
-    previous_token = tokens[index - 1] if index > 0 else ""
-    next_token = tokens[index + 1] if index < len(tokens) - 1 else ""
-    next_content_token = token_after_adverbs(tokens, index)
-    determiners = {"a", "an", "the", "this", "that", "these", "those", "my", "your", "his", "her", "our", "their", "another"}
-    base_verbs = {
-        "be",
-        "have",
-        "do",
-        "go",
-        "get",
-        "make",
-        "take",
-        "see",
-        "come",
-        "help",
-        "use",
-        "work",
-        "find",
-        "learn",
-        "speak",
-        "read",
-        "write",
-        "play",
-        "change",
-        "become",
-        "move",
-        "show",
-        "tell",
-        "give",
-        "keep",
-        "try",
-        "start",
-        "stop",
-        "leave",
-        "bring",
-        "put",
-        "let",
-        "say",
-        "wonder",
-        "phrase",
-    }
-    if base == "can":
-        if group == "aux":
-            return next_content_token in base_verbs
-        if group == "n":
-            return previous_token in determiners or next_token in {"of", "with"}
-        if group == "v":
-            return (previous_token == "to" and next_token != "of") or next_token in {"up", "food"}
-        return False
-    if base == "way":
-        if group == "adv":
-            return next_token in {"too", "more", "less", "better", "worse", "ahead", "back", "out"} and previous_token not in (determiners | {"own"})
-        if group == "n":
-            return previous_token in determiners or previous_token in {"my", "your", "his", "her", "our", "their"} or next_token in {"of", "to"}
-    if base == "even":
-        if group == "adv":
-            return next_token in {"though", "if", "when", "so", "more", "less", "better", "worse"} or previous_token not in determiners
-        if group == "adj":
-            return next_token in {"number", "numbers", "surface", "surfaces", "distribution", "chance", "chances"}
-        if group == "n":
-            return previous_token in determiners and next_token in {"number", "numbers"}
-        if group == "v":
-            return next_token in {"out", "up"}
-        return False
-    if base == "still":
-        if group == "adv":
-            return previous_token not in determiners and next_token not in {"life", "lives", "water", "waters", "picture", "pictures", "photograph", "photographs"}
-        if group == "adj":
-            return next_token in {"water", "waters", "life", "lives", "picture", "pictures", "photograph", "photographs"}
-        if group == "n":
-            return previous_token in determiners and next_token in {"photo", "photos", "photograph", "photographs", "image", "images"}
-        if group == "v":
-            return previous_token == "to" and next_token in {"the", "his", "her", "their", "its"}
-        if group == "conj":
-            return index == 0 and len(tokens) > 3 and tokens[1] not in {"want", "wants", "wanted"}
-        return False
-    if base == "well":
-        if group == "adv":
-            return previous_token not in determiners and (index == len(tokens) - 1 or next_token in {"enough", "aware", "known", "suited"})
-        if group == "adj":
-            return previous_token in {"am", "is", "are", "was", "were", "be", "been", "being", "feel", "feels", "felt"} and next_token not in {"looked", "known", "done", "made", "suited"}
-        if group == "n":
-            return previous_token in determiners or next_token in {"of"}
-        if group == "interj":
-            return index == 0
-        if group == "v":
-            return next_token in {"up", "out"}
-    return True
 
 
-def part_of_speech_penalty(sentence: str, word: str, part_of_speech: str) -> int:
-    group = normalize_part_group(part_of_speech)
-    if group == "phrase":
-        return 0
-    if not high_ambiguity_pos_allowed(sentence, word, part_of_speech):
-        return 10
-    form = matched_form_in_sentence(sentence, word)
-    if not form:
-        return 6
-
-    base_word = word.lower()
-    if group in {"v", "adj", "adv", "aux"} and form == f"{base_word}s":
-        return 10
-
-    lowered = sentence.lower()
-    tokens, token_index = first_match_context(sentence, word)
-    previous_token = tokens[token_index - 1] if token_index > 0 else ""
-    next_token = tokens[token_index + 1] if 0 <= token_index < len(tokens) - 1 else ""
-    next_content_token = token_after_adverbs(tokens, token_index) if token_index >= 0 else ""
-    common_nouns_after_adjective = {
-        "speech",
-        "task",
-        "job",
-        "work",
-        "problem",
-        "question",
-        "issue",
-        "situation",
-        "experience",
-        "role",
-        "case",
-        "idea",
-        "project",
-        "course",
-        "position",
-        "time",
-        "thing",
-        "things",
-        "people",
-        "life",
-    }
-    escaped = re.escape(form)
-    determiners = {"a", "an", "the", "this", "that", "these", "those", "my", "your", "his", "her", "our", "their", "another", "enough"}
-    noun_preceders = determiners | {"real", "great", "big", "new", "major", "serious", "important", "difficult"}
-    before = previous_token in noun_preceders or re.search(rf"\b(?:a|an|the|this|that|these|those|my|your|his|her|our|their|another|enough|real|great|big|new|major|serious|important|difficult)\s+{escaped}\b", lowered)
-    after = re.search(rf"\b{escaped}\s+(?:of|for|from|with|in|on|to|that|which)\b", lowered)
-    base_verbs = {
-        "be",
-        "have",
-        "do",
-        "go",
-        "get",
-        "make",
-        "take",
-        "see",
-        "come",
-        "help",
-        "use",
-        "work",
-        "find",
-        "learn",
-        "speak",
-        "read",
-        "write",
-        "play",
-        "change",
-        "become",
-        "move",
-        "show",
-        "tell",
-        "give",
-        "keep",
-        "try",
-        "start",
-        "stop",
-        "leave",
-        "bring",
-        "put",
-        "let",
-        "say",
-        "wonder",
-        "phrase",
-    }
-    aux_use = next_content_token in base_verbs
-    to_verb = re.search(rf"\bto\s+{escaped}\b", lowered)
-    copulas = {"am", "is", "are", "was", "were", "be", "been", "being", "feel", "feels", "felt", "seem", "seems", "seemed", "look", "looks", "looked"}
-    be_adj = previous_token in copulas or re.search(rf"\b(?:am|is|are|was|were|be|been|being|feel|feels|felt|seem|seems|seemed|look|looks|looked)\s+{escaped}\b", lowered)
-    ly_form = form.endswith("ly")
-    noun_phrase_use = bool(before or after or re.search(rf"\b(?:in|on|by|from|with|through|into)\s+(?:a|an|the|this|that|another|my|your|his|her|our|their)?\s*{escaped}\b", lowered))
-    adverbial_end_use = token_index == len(tokens) - 1 and previous_token not in determiners
-
-    if group == "aux":
-        return 0 if aux_use else 6
-    if group == "n":
-        penalty = 0
-        if form.endswith("s") and form != word.lower():
-            penalty += 7
-        if aux_use or to_verb:
-            penalty += 8
-        if noun_phrase_use:
-            penalty -= 2
-        elif word.lower() in {"can", "well", "way"}:
-            penalty += 4
-        return max(0, penalty)
-    if group == "v":
-        penalty = 0
-        if form.endswith("ing") and next_token in common_nouns_after_adjective:
-            return 10
-        if before and not to_verb and not form.endswith("s"):
-            penalty += 5
-        if aux_use or to_verb or form.endswith(("ed", "ing", "s")):
-            penalty -= 1
-        if form.endswith("ing") and previous_token not in {"am", "is", "are", "was", "were", "be", "been", "being", "keep", "keeps", "kept", "start", "starts", "started", "stop", "stops", "stopped"}:
-            penalty += 3
-        if form.endswith("s") and previous_token in determiners:
-            penalty += 4
-        if word.lower() == "can" and aux_use:
-            penalty += 5
-        return max(0, penalty)
-    if group == "adj":
-        penalty = 0
-        if be_adj:
-            penalty -= 2
-        elif next_token and next_token not in {"of", "to", "for", "with", "in", "on"} and not aux_use:
-            penalty -= 1
-        elif word.lower() in {"well"}:
-            penalty += 4
-        if aux_use:
-            penalty += 5
-        if adverbial_end_use and word.lower() in {"well"}:
-            penalty += 5
-        if ly_form:
-            penalty += 2
-        return max(0, penalty)
-    if group == "adv":
-        penalty = 0
-        if ly_form:
-            penalty -= 2
-        if before:
-            penalty += 4
-        if aux_use:
-            penalty += 3
-        if word.lower() == "way" and noun_phrase_use:
-            penalty += 5
-        if word.lower() == "well" and adverbial_end_use:
-            penalty -= 2
-        return max(0, penalty)
-    return 1
 
 
-def sentence_quality_score(
-    sentence: str,
-    word: str = "",
-    part_of_speech: str = "",
-    source: str = "dictionary",
-) -> tuple[int, int, int, int, str]:
-    word_count = english_word_count(sentence)
-    if 6 <= word_count <= 18:
-        length_penalty = 0
-    elif 4 <= word_count <= 24:
-        length_penalty = 1
-    else:
-        length_penalty = 3
-
-    punctuation_penalty = 0
-    if re.search(r"https?://|www\.|[@#]", sentence, re.IGNORECASE):
-        punctuation_penalty += 5
-    if re.search(r"[_{}\[\]<>]", sentence):
-        punctuation_penalty += 2
-    if sentence.count('"') > 2:
-        punctuation_penalty += 1
-    if re.search(r",\s*(?:guys|man|dude|sir|madam|mom|dad)[.!?]?$", sentence, re.IGNORECASE):
-        punctuation_penalty += 2
-    if sentence.rstrip().endswith("!"):
-        punctuation_penalty += 1
-
-    target_position_penalty = example_target_position_penalty(sentence, word) if word else 0
-    pos_penalty = part_of_speech_penalty(sentence, word, part_of_speech) if word and part_of_speech else 0
-    translation_penalty = 3
-    return (
-        translation_penalty,
-        pos_penalty,
-        length_penalty + punctuation_penalty + target_position_penalty,
-        len(sentence),
-        sentence.lower(),
-    )
 
 
-def ambiguous_library_words(rows: list[sqlite3.Row]) -> set[str]:
-    row_words = sorted({str(row["word"]).strip().lower() for row in rows if str(row["word"]).strip()})
-    if not row_words:
-        return set()
-
-    placeholders = ",".join("?" for _ in row_words)
-    library_rows = get_db().execute(
-        f"""
-        SELECT lower(word) AS word_key, part_of_speech
-        FROM words
-        WHERE library_id = ?
-          AND lower(word) IN ({placeholders})
-        """,
-        [get_active_library_id(), *row_words],
-    ).fetchall()
-
-    grouped_parts: dict[str, set[str]] = {}
-    for row in library_rows:
-        word = str(row["word_key"]).strip().lower()
-        if not word:
-            continue
-        grouped_parts.setdefault(word, set()).add(normalize_part_group(str(row["part_of_speech"])))
-    return {word for word, parts in grouped_parts.items() if len(parts) > 1}
 
 
-def usable_wordnet_example(sentence: str, word: str) -> bool:
-    stripped = sentence.strip()
-    if not stripped or not valid_example_sentence(stripped, word):
-        return False
-    if contains_blocked_example_word(stripped):
-        return False
-    if len(stripped) < 6 or len(stripped) > 180:
-        return False
-    return True
 
 
 def wiktionary_jsonl_path() -> Path | None:
@@ -2167,174 +514,81 @@ def wiktionary_source_signature() -> str | None:
     return f"{path.name}:{stat.st_size}:{int(stat.st_mtime)}:{WIKTIONARY_SCHEMA_VERSION}"
 
 
-def wiktionary_part_group(part_of_speech: str) -> str:
-    group = normalize_part_group(part_of_speech)
-    if group == "aux":
-        return "v"
-    if group == "conj":
-        return "adv"
-    if group == "noun":
-        return "n"
-    if group == "verb":
-        return "v"
-    if group == "adjective":
-        return "adj"
-    if group == "adverb":
-        return "adv"
-    return group
 
 
-def wiktionary_lookup_groups(part_of_speech: str, word: str) -> list[str]:
-    primary = wiktionary_part_group(part_of_speech)
-    groups = [primary]
-    if primary == "phrase" and re.search(r"\s", word.strip()):
-        groups.extend(["prep", "v", "adj", "adv", "n"])
-    return list(dict.fromkeys(group for group in groups if group))
 
 
-def normalize_wiktionary_pos(pos: str) -> str:
-    mapping = {
-        "noun": "n",
-        "proper noun": "n",
-        "verb": "v",
-        "adj": "adj",
-        "adjective": "adj",
-        "adv": "adv",
-        "adverb": "adv",
-        "pron": "pron",
-        "pronoun": "pron",
-        "prep": "prep",
-        "preposition": "prep",
-        "conj": "conj",
-        "conjunction": "conj",
-        "interj": "interj",
-        "intj": "interj",
-        "interjection": "interj",
-        "num": "num",
-        "numeral": "num",
-        "det": "det",
-        "determiner": "det",
-        "phrase": "phrase",
-    }
-    return mapping.get(pos.strip().lower(), pos.strip().lower())
 
 
-def clean_wiktionary_example_text(text: str) -> str:
-    # Strip Wiktionary omission markers that add no value for cloze practice
-    # but would otherwise fail the special-character filter (the brackets).
-    text = re.sub(r"\[…\]|\[\.\.\.\]|\[sic\]|\[Sic\]", "", text)
-    cleaned = re.sub(r"\s+", " ", text).strip()
-    cleaned = cleaned.replace(" ", " ")
-    return cleaned
 
 
-def extract_example_sentence(text: str, word: str) -> str:
-    """Pick the single best sentence containing the target word.
-
-    Wiktionary quotations are often multi-sentence passages (well over the
-    usable length limit) where only one sentence actually uses the target word,
-    e.g. common nouns like "shortage" whose only examples are long book/news
-    quotes. Returning that one sentence keeps such words from having no example
-    at all. If the whole text is already a single short sentence, it is returned
-    unchanged.
-    """
-    cleaned = clean_wiktionary_example_text(text)
-    if not cleaned:
-        return ""
-
-    pattern = cloze_match_pattern(word)
-    if pattern is None:
-        return cleaned
-
-    # Split into sentences on ., !, ? followed by whitespace. A perfect
-    # tokenizer is unnecessary for choosing a cloze sentence.
-    parts = re.split(r"(?<=[.!?])\s+", cleaned)
-    if len(parts) <= 1:
-        return cleaned
-
-    matching = [part.strip() for part in parts if pattern.search(part)]
-    if not matching:
-        # Target word only appears across a sentence boundary; leave the full
-        # text so the caller's usability check can decide.
-        return cleaned
-
-    # Prefer the shortest matching sentence that is long enough to be a real
-    # example, so the cloze prompt stays focused.
-    matching.sort(key=len)
-    for candidate in matching:
-        if len(candidate) >= 6:
-            return candidate
-    return matching[0]
 
 
-def usable_wiktionary_example(sentence: str, word: str) -> bool:
-    stripped = clean_wiktionary_example_text(sentence)
-    if not stripped or not valid_example_sentence(stripped, word):
-        return False
-    if contains_blocked_example_word(stripped):
-        return False
-    if len(stripped) < 6 or len(stripped) > 500:
-        return False
-    if re.search(r"https?://|www\.|[@#]|→|<|>|[_{}\[\]]", stripped):
-        return False
-    if stripped.startswith(("Synonyms:", "Antonyms:", "Holonyms:", "Meronyms:", "Hyponyms:", "Hypernyms:")):
-        return False
-    if len(re.findall(r"[A-Za-z]+", stripped)) < 2:
-        return False
-    return True
 
 
-def wiktionary_example_rank(example: dict[str, object], sentence: str) -> int:
-    rank = 0
-    if example.get("type") == "quotation":
-        rank += 80
-    if example.get("ref"):
-        rank += 3
-    if sentence.lower().startswith("to "):
-        rank += 12
-    if sentence.count(";") or " / " in sentence:
-        rank += 8
-    if len(sentence) > 120:
-        rank += 2
-    return rank
 
 
 # Sense tags worth warning the learner about when they appear on an example.
 # Mapped to a short human-readable label shown in cloze practice.
-NOTABLE_EXAMPLE_TAGS = {
-    "archaic": "archaic usage",
-    "obsolete": "obsolete usage",
-    "dated": "dated usage",
-    "rare": "rare usage",
-}
 
 
-def example_note_from_tags(sense_tags: str | None) -> str | None:
-    """Return a short note (e.g. 'archaic usage') if the example's sense carries
-    a notable tag, so cloze practice can warn the learner that the sentence may
-    read oddly. Returns None for ordinary examples."""
-    if not sense_tags:
-        return None
-    tags = {tag.strip().lower() for tag in str(sense_tags).split(",") if tag.strip()}
-    labels = [label for tag, label in NOTABLE_EXAMPLE_TAGS.items() if tag in tags]
-    return "; ".join(labels) if labels else None
 
 
-def simplify_chinese(text: str | None) -> str | None:
-    if text is None:
-        return None
-    if OPENCC_T2S is not None:
-        return OPENCC_T2S.convert(text)
-    return text.translate(TRADITIONAL_TO_SIMPLIFIED)
 
 
 def _lookup_note(lookup: sqlite3.Row) -> str | None:
-    """Extract an example note (e.g. 'archaic usage') from a lookup row.
-    WordNet rows have no sense_tags, so guard the access."""
+    """Extract an example note such as ``archaic usage`` from a lookup row."""
     try:
         return example_note_from_tags(lookup["sense_tags"])
     except (IndexError, KeyError):
         return None
+
+
+def wiktionary_lookup_available() -> bool:
+    return bool(wiktionary_jsonl_path()) or lookup_available(get_db(), "wiktionary_examples")
+
+
+def example_lookup_available() -> bool:
+    return wiktionary_lookup_available()
+
+
+def wiktionary_part_lookup_available() -> bool:
+    """Return whether an exact word/POS check can be performed.
+
+    Release builds may ship the compact exam POS index without the much larger
+    example/definition tables, so POS validation has its own availability
+    check instead of reusing example availability.
+    """
+    db = get_db()
+    if WIKTIONARY_EXAM_POS_PATH.is_file():
+        ensure_wiktionary_exam_pos_index(db, WIKTIONARY_EXAM_POS_PATH)
+    return bool(wiktionary_jsonl_path()) or any(
+        lookup_available(db, table)
+        for table in ("wiktionary_definitions", "wiktionary_examples", "wiktionary_exam_parts")
+    )
+
+
+def wiktionary_part_exists(word: str, part_of_speech: str) -> bool:
+    """Confirm that Wiktionary contains the requested normalized word/POS."""
+    if not wiktionary_part_lookup_available():
+        return False
+    word_keys = sorted(spelling_variants(word))
+    groups = wiktionary_lookup_groups(part_of_speech, word)
+    db = get_db()
+    key_marks = ",".join("?" for _ in word_keys)
+    group_marks = ",".join("?" for _ in groups)
+    for table in ("wiktionary_definitions", "wiktionary_examples", "wiktionary_exam_parts"):
+        if not db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?", (table,)
+        ).fetchone():
+            continue
+        if db.execute(
+            f"SELECT 1 FROM {table} WHERE word_key IN ({key_marks}) "
+            f"AND part_group IN ({group_marks}) LIMIT 1",
+            (*word_keys, *groups),
+        ).fetchone():
+            return True
+    return False
 
 
 def fill_examples_from_dictionaries(
@@ -2342,10 +596,10 @@ def fill_examples_from_dictionaries(
     end: int = 100,
     mode: str = "best",
 ) -> tuple[int, int]:
-    if not WORDNET_ZIP_PATH.exists() and not wiktionary_jsonl_path():
+    if not example_lookup_available():
         return 0, -1
 
-    rows = fetch_word_range(start, end, "id, word, part_of_speech, example_sentence")
+    rows = fetch_word_range(start, end, "id, word, part_of_speech, example_sentence, example_source")
     if not rows:
         return 0, 0
 
@@ -2359,13 +613,11 @@ def fill_examples_from_dictionaries(
         definition = lookup_wiktionary_definition(word, part_of_speech)
         if definition:
             definitions[int(row["id"])] = definition
-        else:
-            definition = lookup_wordnet_definition(word, part_of_speech)
-            if definition:
-                definitions[int(row["id"])] = definition
 
         if mode == "refresh":
-            # Refresh replaces the current example with a different candidate.
+            # A handwritten example always wins and is never replaced.
+            if row["example_source"] == "user":
+                continue
             lookup = refresh_example_candidate(word, part_of_speech, row["example_sentence"], top_n=8)
             if lookup:
                 matches[int(row["id"])] = (lookup["example_sentence"], lookup["definition"], _lookup_note(lookup))
@@ -2379,10 +631,6 @@ def fill_examples_from_dictionaries(
         lookup = lookup_wiktionary_example(word, part_of_speech)
         if lookup:
             matches[int(row["id"])] = (lookup["example_sentence"], lookup["definition"], _lookup_note(lookup))
-            continue
-        lookup = lookup_wordnet_example(word, part_of_speech)
-        if lookup:
-            matches[int(row["id"])] = (lookup["example_sentence"], lookup["definition"], _lookup_note(lookup))
 
     # Neither mode clears existing content: fill only adds where empty, and
     # refresh only replaces entries that found a new candidate.
@@ -2394,6 +642,7 @@ def fill_examples_from_dictionaries(
             SET example_sentence = ?,
                 example_translation = NULL,
                 example_note = ?,
+                example_source = 'wiktionary',
                 definition = COALESCE(?, definition),
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ? AND library_id = ?
@@ -2419,77 +668,35 @@ def fill_examples_from_dictionaries(
             """,
             [*params, get_active_library_id(), *batch],
         )
+    for word_id in sorted(set(matches) | set(definition_only_ids)):
+        lexicon_repository.sync_learning_word(get_db(), word_id)
     get_db().commit()
     return len(matches), len(rows)
 
 
 def schedule_initial_review(word_id: int) -> None:
-    get_db().execute(
-        """
-        UPDATE words
-        SET review_stage = 0,
-            next_review_at = COALESCE(next_review_at, ?),
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND library_id = ?
-        """,
-        (next_review_date(0), word_id, get_active_library_id()),
+    review_service.schedule_initial(
+        get_db(), get_active_library_id(), word_id, next_review_date,
     )
 
 
 def complete_review(word_id: int) -> None:
-    word = fetch_word(word_id)
-    if word is None:
-        return
-    target = review_target_count()
-    new_count = int(word["review_correct_count"]) + 1
-    new_stage = int(word["review_stage"]) + 1
-    next_at = None if new_count >= target else next_review_date(new_stage)
-    get_db().execute(
-        """
-        UPDATE words
-        SET status = ?,
-            review_correct_count = ?,
-            review_stage = ?,
-            next_review_at = ?,
-            last_reviewed_at = CURRENT_TIMESTAMP,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND library_id = ?
-        """,
-        (STATUS_LEARNED, new_count, new_stage, next_at, word_id, get_active_library_id()),
+    review_service.complete(
+        get_db(), get_active_library_id(), word_id, review_target_count(),
+        STATUS_LEARNED, next_review_date,
     )
 
 
 def reset_review_schedule(word_id: int) -> None:
-    get_db().execute(
-        """
-        UPDATE words
-        SET review_correct_count = 0,
-            review_stage = 0,
-            next_review_at = NULL,
-            last_reviewed_at = NULL,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND library_id = ?
-        """,
-        (word_id, get_active_library_id()),
-    )
+    review_service.reset(get_db(), get_active_library_id(), word_id)
 
 
 def fetch_libraries() -> list[sqlite3.Row]:
-    return get_db().execute(
-        """
-        SELECT
-            libraries.*,
-            COUNT(words.id) AS word_count
-        FROM libraries
-        LEFT JOIN words ON words.library_id = libraries.id
-        GROUP BY libraries.id
-        ORDER BY libraries.id ASC
-        """
-    ).fetchall()
+    return library_repository.fetch_all(get_db())
 
 
 def fetch_library(library_id: int) -> sqlite3.Row | None:
-    return get_db().execute("SELECT * FROM libraries WHERE id = ?", (library_id,)).fetchone()
+    return library_repository.fetch_one(get_db(), library_id)
 
 
 def get_active_library_id() -> int:
@@ -2514,23 +721,11 @@ def get_active_library() -> sqlite3.Row:
 
 
 def get_or_create_library(name: str) -> int:
-    row = get_db().execute("SELECT id FROM libraries WHERE name = ?", (name,)).fetchone()
-    if row:
-        return int(row["id"])
-    cursor = get_db().execute("INSERT INTO libraries (name) VALUES (?)", (name,))
-    get_db().commit()
-    return int(cursor.lastrowid)
+    return library_repository.get_or_create(get_db(), name)
 
 
 def reset_ecdict_library(library_id: int) -> None:
-    get_db().execute(
-        """
-        DELETE FROM words
-        WHERE library_id = ? AND source = ?
-        """,
-        (library_id, "ECDICT"),
-    )
-    get_db().commit()
+    library_repository.delete_source_words(get_db(), library_id, "ECDICT")
 
 
 def prune_word_ids_from_session(word_ids: set[int]) -> None:
@@ -2567,976 +762,64 @@ def delete_word_ids(word_ids: set[int], library_id: int) -> int:
     return deleted
 
 
-def parse_word_file(filename: str, raw: bytes) -> tuple[list[dict[str, str]], list[str]]:
-    text = raw.decode("utf-8-sig")
-    suffix = Path(filename).suffix.lower()
-    if suffix == ".csv":
-        return parse_csv(text)
-    return parse_text_lines(text)
-
-
-def normalize_entry(row: list[str], line_number: int) -> tuple[dict[str, str] | None, str | None]:
-    if len(row) < 3:
-        return None, f"Line {line_number}: expected word, part of speech, and meaning."
-
-    word = row[0].strip()
-    part_of_speech = normalize_user_pos(row[1].strip())
-    meaning = row[2].strip()
-    example_sentence = row[3].strip() if len(row) > 3 else ""
-    example_translation = row[4].strip() if len(row) > 4 else ""
-
-    if not word or not part_of_speech or not meaning:
-        return None, f"Line {line_number}: word, part of speech, and meaning are required."
-
-    entry = {"word": word, "part_of_speech": part_of_speech, "meaning": meaning}
-    if example_sentence:
-        if valid_example_sentence(example_sentence, word):
-            entry["example_sentence"] = example_sentence
-            if example_translation:
-                entry["example_translation"] = example_translation
-        else:
-            return entry, f"Line {line_number}: example sentence ignored because it does not contain the target word."
-    return entry, None
-
-
-def parse_csv(text: str) -> tuple[list[dict[str, str]], list[str]]:
-    entries: list[dict[str, str]] = []
-    errors: list[str] = []
-    reader = csv.reader(io.StringIO(text))
-    rows = list(reader)
-
-    if not rows:
-        return entries, ["The file is empty."]
-
-    first = [cell.strip().lower() for cell in rows[0]]
-    has_header = {"word", "part_of_speech", "meaning"}.issubset(set(first))
-
-    start_index = 1 if has_header else 0
-    field_indexes = (0, 1, 2)
-    if has_header:
-        field_indexes = (first.index("word"), first.index("part_of_speech"), first.index("meaning"))
-        example_index = first.index("example_sentence") if "example_sentence" in first else None
-        example_translation_index = first.index("example_translation") if "example_translation" in first else None
-    else:
-        example_index = 3
-        example_translation_index = 4
-
-    for index, row in enumerate(rows[start_index:], start=start_index + 1):
-        if not row or all(not cell.strip() for cell in row):
-            continue
-        selected = [row[i] if i < len(row) else "" for i in field_indexes]
-        if example_index is not None:
-            selected.append(row[example_index] if example_index < len(row) else "")
-        if example_translation_index is not None:
-            selected.append(row[example_translation_index] if example_translation_index < len(row) else "")
-        entry, error = normalize_entry(selected, index)
-        if entry:
-            entries.append(entry)
-        if error:
-            errors.append(error)
-
-    return entries, errors
-
-
-def parse_text_lines(text: str) -> tuple[list[dict[str, str]], list[str]]:
-    entries: list[dict[str, str]] = []
-    errors: list[str] = []
-
-    for index, line in enumerate(text.splitlines(), start=1):
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-
-        if "\t" in stripped:
-            row = stripped.split("\t", 4)
-        elif "|" in stripped:
-            row = stripped.split("|", 4)
-        else:
-            row = re.split(r"\s*,\s*", stripped, maxsplit=4)
-
-        entry, error = normalize_entry(row, index)
-        if entry:
-            entries.append(entry)
-        if error:
-            errors.append(error)
-
-    if not entries and not errors:
-        errors.append("The file does not contain any usable words.")
-
-    return entries, errors
-
-
-def split_ecdict_tags(raw_tags: str) -> set[str]:
-    return {tag.strip().lower() for tag in re.split(r"[\s,/;|]+", raw_tags or "") if tag.strip()}
-
-
-def clean_ecdict_text(value: str, line_separator: str = " ") -> str:
-    text = (value or "").replace("\\n", "\n")
-    lines = [re.sub(r"\s+", " ", line).strip() for line in text.splitlines()]
-    lines = [line for line in lines if line]
-    if not lines:
-        return ""
-    return line_separator.join(lines)
-
-
-def format_ecdict_definition(raw_definition: str) -> str:
-    lines: list[str] = []
-    for line in (raw_definition or "").replace("\\n", "\n").splitlines():
-        line = re.sub(r"\s+", " ", line).strip()
-        if not line:
-            continue
-        lines.extend(part.strip() for part in ECDICT_DEFINITION_SPLIT_RE.split(line) if part.strip())
-    return "\n".join(lines)
-
-
-def normalize_ecdict_pos(raw_pos: str) -> str:
-    first = re.split(r"[\s,/;|.]+", raw_pos.strip().lower())[0] if raw_pos else ""
-    return ECDICT_POS_MAP.get(first, "phrase")
-
-
-def infer_pos_from_ecdict_definition(raw_definition: str) -> str:
-    counts: dict[str, int] = {}
-    for line in (raw_definition or "").replace("\\n", "\n").splitlines():
-        match = ECDICT_DEFINITION_POS_RE.match(line)
-        if not match:
-            continue
-        part = normalize_ecdict_pos(match.group(1))
-        if part == "phrase":
-            continue
-        counts[part] = counts.get(part, 0) + 1
-    if not counts:
-        return ""
-    return max(counts.items(), key=lambda item: item[1])[0]
-
-
-def infer_pos_from_ecdict_exchange(raw_exchange: str) -> str:
-    tokens = {token.strip().lower() for token in re.split(r"[/,;|\s]+", raw_exchange or "") if token.strip()}
-    if {"1:s", "p:s", "plural", "pl"} & tokens:
-        return "n"
-    return ""
-
-
-def infer_pos_from_word_shape(word: str, meaning: str) -> str:
-    word_key = word.strip().lower()
-    if not word_key or re.search(r"\s", word_key):
-        return ""
-    if "-" in word_key:
-        if meaning.strip().endswith("的"):
-            return "adj"
-        return ""
-    noun_suffixes = (
-        "tion",
-        "sion",
-        "ment",
-        "ness",
-        "ity",
-        "ism",
-        "ance",
-        "ence",
-        "ship",
-        "graph",
-        "er",
-        "or",
-    )
-    adjective_suffixes = (
-        "al",
-        "ial",
-        "ical",
-        "ic",
-        "ive",
-        "ous",
-        "less",
-        "able",
-        "ible",
-        "ary",
-        "ory",
-        "ant",
-        "ent",
-        "ed",
-    )
-    if word_key.endswith("ly"):
-        return "adv"
-    if word_key.endswith(noun_suffixes):
-        return "n"
-    if word_key.endswith(adjective_suffixes) or meaning.strip().endswith("的"):
-        return "adj"
-    return ""
-
-
-def infer_ecdict_fallback_pos(row: dict[str, str]) -> str:
-    explicit_pos = normalize_ecdict_pos(row.get("pos", ""))
-    if explicit_pos != "phrase":
-        return explicit_pos
-
-    definition_pos = infer_pos_from_ecdict_definition(row.get("definition", ""))
-    if definition_pos:
-        return definition_pos
-
-    exchange_pos = infer_pos_from_ecdict_exchange(row.get("exchange", ""))
-    if exchange_pos:
-        return exchange_pos
-
-    shape_pos = infer_pos_from_word_shape(row.get("word", ""), row.get("translation", ""))
-    if shape_pos:
-        return shape_pos
-
-    return "phrase"
-
-
-def split_ecdict_translation(raw_translation: str, fallback_pos: str) -> list[tuple[str, str]]:
-    entries: list[tuple[str, str]] = []
-    current_pos = ""
-    current_meaning: list[str] = []
-
-    def flush_current() -> None:
-        if not current_meaning:
-            return
-        meaning = clean_ecdict_text("\n".join(current_meaning), line_separator="；")
-        if meaning:
-            entries.append((current_pos or fallback_pos, meaning))
-
-    for line in (raw_translation or "").replace("\\n", "\n").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-
-        match = ECDICT_POS_PREFIX_RE.match(line)
-        if match:
-            prefix = normalize_ecdict_pos(match.group(1))
-            remainder = match.group(2).strip()
-            if prefix != "phrase":
-                flush_current()
-                current_pos = prefix
-                current_meaning = [remainder] if remainder else []
-                continue
-
-        if current_meaning:
-            current_meaning.append(line)
-        else:
-            current_pos = fallback_pos
-            current_meaning = [line]
-
-    flush_current()
-
-    if entries:
-        return entries
-    cleaned = clean_ecdict_text(raw_translation)
-    return [(fallback_pos, cleaned)] if cleaned else []
-
-
-def normalize_ecdict_frequency(row: dict[str, str]) -> int | None:
-    for key in ("frq", "bnc"):
-        value = (row.get(key) or "").strip()
-        if not value:
-            continue
-        try:
-            frequency = int(float(value))
-        except ValueError:
-            continue
-        if frequency > 0:
-            return frequency
-    return None
-
-
-def parse_ecdict_csv(
-    raw: bytes,
-    presets: dict[str, dict[str, object]] | None = None,
-) -> tuple[dict[str, list[dict[str, str]]], list[str]]:
-    if presets is None:
-        presets = ECDICT_PRESET_LIBRARIES
-
-    text = raw.decode("utf-8-sig")
-    reader = csv.DictReader(io.StringIO(text))
-    if not reader.fieldnames:
-        return {}, ["The ECDICT file is empty or missing a header row."]
-
-    fieldnames = {name.strip().lower() for name in reader.fieldnames if name}
-    required = {"word", "translation", "tag"}
-    missing = required - fieldnames
-    if missing:
-        return {}, [f"ECDICT CSV is missing required columns: {', '.join(sorted(missing))}."]
-
-    grouped: dict[str, list[dict[str, str]]] = {
-        str(config["name"]): [] for config in presets.values()
-    }
-    errors: list[str] = []
-
-    for line_number, row in enumerate(reader, start=2):
-        normalized = {(key or "").strip().lower(): (value or "").strip() for key, value in row.items()}
-        word = normalized.get("word", "")
-        translation = normalized.get("translation", "")
-        tags = split_ecdict_tags(normalized.get("tag", ""))
-        if not word or not translation or not tags:
-            continue
-
-        target_libraries = []
-        for config in presets.values():
-            preset_tags = set(config["tags"])
-            if tags & preset_tags:
-                target_libraries.append(str(config["name"]))
-        if not target_libraries:
-            continue
-
-        fallback_pos = infer_ecdict_fallback_pos(normalized)
-        translations = split_ecdict_translation(translation, fallback_pos)
-        for part_of_speech, meaning in translations:
-            entry = {
-                "word": word,
-                "part_of_speech": part_of_speech,
-                "meaning": meaning,
-                "phonetic": normalized.get("phonetic") or None,
-                "definition": format_ecdict_definition(normalized.get("definition", "")) or None,
-                "frequency": normalize_ecdict_frequency(normalized),
-                "source": "ECDICT",
-                "source_tags": normalized.get("tag") or None,
-            }
-
-            for library_name in target_libraries:
-                grouped[library_name].append(entry)
-
-    grouped = {library_name: entries for library_name, entries in grouped.items() if entries}
-    if not grouped:
-        errors.append("No supported ECDICT tags were found. Supported tags include zk, gk, cet4, cet6, ky, ielts, toefl, gre.")
-
-    return grouped, errors
-
-
-def ecdict_entries_for_word(
-    word: str,
-    part_of_speech: str = "",
-    meaning: str = "",
-    raw: bytes | None = None,
-) -> list[dict[str, object]]:
-    word_key = word.strip().lower()
-    if not word_key:
-        return []
-
-    if raw is None:
-        try:
-            raw = load_ecdict_data()
-        except Exception:
-            return []
-
-    requested_part = normalize_user_pos(part_of_speech.strip()) if part_of_speech else ""
-    text = raw.decode("utf-8-sig")
-    reader = csv.DictReader(io.StringIO(text))
-    merged: dict[str, dict[str, object]] = {}
-    for row in reader:
-        normalized = {(key or "").strip().lower(): (value or "").strip() for key, value in row.items()}
-        if normalized.get("word", "").lower() != word_key:
-            continue
-
-        fallback_pos = infer_ecdict_fallback_pos(normalized)
-        translations = split_ecdict_translation(normalized.get("translation", ""), fallback_pos)
-        for entry_part, entry_meaning in translations:
-            part = normalize_user_pos(entry_part)
-            if requested_part and part != requested_part:
-                continue
-            if not entry_meaning and not meaning:
-                continue
-            existing = merged.setdefault(
-                part,
-                {
-                    "word": normalized.get("word") or word,
-                    "part_of_speech": part,
-                    "meaning_parts": [],
-                    "phonetic": normalized.get("phonetic") or None,
-                    "definition": format_ecdict_definition(normalized.get("definition", "")) or None,
-                    "frequency": normalize_ecdict_frequency(normalized),
-                    "source": "ECDICT",
-                    "source_tags": normalized.get("tag") or None,
-                },
-            )
-            if entry_meaning:
-                existing["meaning_parts"].append(entry_meaning)
-
-    entries: list[dict[str, object]] = []
-    for part, entry in merged.items():
-        selected_meaning = meaning or merge_text_values(*(entry.pop("meaning_parts") or []))
-        if selected_meaning:
-            entry["meaning"] = selected_meaning
-            entries.append(entry)
-
-    if requested_part and meaning and not entries:
-        entries.append({"word": word, "part_of_speech": requested_part, "meaning": meaning})
-
-    return entries
-
-
-def load_ecdict_data() -> bytes:
-    if BUNDLED_ECDICT_PATH.exists():
-        return BUNDLED_ECDICT_PATH.read_bytes()
-
-    if ECDICT_CACHE_PATH.exists():
-        return ECDICT_CACHE_PATH.read_bytes()
-
-    DATA_DIR.mkdir(exist_ok=True)
-    with urllib.request.urlopen(ECDICT_SOURCE_URL, timeout=30) as response:
-        raw = response.read()
-    ECDICT_CACHE_PATH.write_bytes(raw)
-    return raw
-
-
-def ecdict_source_signature() -> str | None:
-    if BUNDLED_ECDICT_PATH.exists():
-        path = BUNDLED_ECDICT_PATH
-    elif ECDICT_CACHE_PATH.exists():
-        path = ECDICT_CACHE_PATH
-    else:
-        return None
-    stat = path.stat()
-    return f"{path.name}:{stat.st_size}:{int(stat.st_mtime)}:{ECDICT_LOOKUP_SCHEMA_VERSION}"
-
-
-def ensure_ecdict_lookup_index() -> None:
-    signature = ecdict_source_signature()
-    if not signature:
-        return
-
-    db = get_db()
-    existing = db.execute("SELECT value FROM metadata WHERE key = ?", ("ecdict_lookup_signature",)).fetchone()
-    table_exists = db.execute(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
-        ("ecdict_lookup",),
-    ).fetchone()
-    if table_exists and existing and existing["value"] == signature:
-        return
-
-    try:
-        raw = load_ecdict_data()
-    except OSError:
-        # No bundled/cached ECDICT and the download failed (e.g. offline).
-        # Skip enrichment instead of turning an import/edit into a 500.
-        return
-    db.execute("DROP TABLE IF EXISTS ecdict_lookup")
-    db.execute(
-        """
-        CREATE TABLE ecdict_lookup (
-            word_key TEXT PRIMARY KEY,
-            word TEXT NOT NULL,
-            phonetic TEXT,
-            definition TEXT,
-            frequency INTEGER,
-            source_tags TEXT
-        )
-        """
-    )
-
-    text = raw.decode("utf-8-sig")
-    reader = csv.DictReader(io.StringIO(text))
-    rows: dict[str, dict[str, object]] = {}
-    for row in reader:
-        normalized = {(key or "").strip().lower(): (value or "").strip() for key, value in row.items()}
-        word = normalized.get("word", "")
-        word_key = word.lower()
-        if not word_key:
-            continue
-
-        candidate = {
-            "word_key": word_key,
-            "word": word,
-            "phonetic": normalized.get("phonetic") or None,
-            "definition": format_ecdict_definition(normalized.get("definition", "")) or None,
-            "frequency": normalize_ecdict_frequency(normalized),
-            "source_tags": normalized.get("tag") or None,
-        }
-        existing_candidate = rows.get(word_key)
-        if existing_candidate is None:
-            rows[word_key] = candidate
-            continue
-
-        current_frequency = existing_candidate.get("frequency")
-        candidate_frequency = candidate.get("frequency")
-        if current_frequency is None and candidate_frequency is not None:
-            rows[word_key] = candidate
-        elif (
-            current_frequency is not None
-            and candidate_frequency is not None
-            and int(candidate_frequency) < int(current_frequency)
-        ):
-            rows[word_key] = candidate
-
-    db.executemany(
-        """
-        INSERT INTO ecdict_lookup (
-            word_key, word, phonetic, definition, frequency, source_tags
-        )
-        VALUES (?, ?, ?, ?, ?, ?)
-        """,
-        [
-            (
-                row["word_key"],
-                row["word"],
-                row["phonetic"],
-                row["definition"],
-                row["frequency"],
-                row["source_tags"],
-            )
-            for row in rows.values()
-        ],
-    )
-    db.execute(
-        """
-        INSERT INTO metadata (key, value)
-        VALUES (?, ?)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value
-        """,
-        ("ecdict_lookup_signature", signature),
-    )
-    db.commit()
-
-
-def lookup_ecdict_word(word: str) -> sqlite3.Row | None:
-    if not word.strip():
-        return None
-    ensure_ecdict_lookup_index()
-    # When no ECDICT resource is available (e.g. released packages ship without
-    # the large csv), ensure_ecdict_lookup_index() returns early and the
-    # ecdict_lookup table is never created. Treat that as "no enrichment
-    # available" instead of letting the missing table raise a 500.
-    try:
-        return get_db().execute(
-            """
-            SELECT phonetic, definition, frequency, source_tags
-            FROM ecdict_lookup
-            WHERE word_key = ?
-            """,
-            (word.strip().lower(),),
-        ).fetchone()
-    except sqlite3.OperationalError:
-        return None
-
-
-def wordnet_source_signature() -> str | None:
-    if not WORDNET_ZIP_PATH.exists():
-        return None
-    stat = WORDNET_ZIP_PATH.stat()
-    return f"{WORDNET_ZIP_PATH.name}:{stat.st_size}:{int(stat.st_mtime)}:{WORDNET_SCHEMA_VERSION}"
-
-
-def wordnet_part_group(part_of_speech: str) -> str:
-    group = normalize_part_group(part_of_speech)
-    if group == "adj":
-        return "a"
-    if group in {"n", "v", "adv"}:
-        return {"n": "n", "v": "v", "adv": "r"}[group]
-    return group
-
-
-def wordnet_entry_filenames() -> list[str]:
-    return [f"entries-{character}.json" for character in "0abcdefghijklmnopqrstuvwxyz"]
-
-
-def ensure_wordnet_lookup_index() -> None:
-    signature = wordnet_source_signature()
-    if not signature:
-        return
-
-    db = get_db()
-    existing = db.execute("SELECT value FROM metadata WHERE key = ?", ("wordnet_lookup_signature",)).fetchone()
-    table_exists = db.execute(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
-        ("wordnet_examples",),
-    ).fetchone()
-    if table_exists and existing and existing["value"] == signature:
-        return
-
-    with zipfile.ZipFile(WORDNET_ZIP_PATH) as archive:
-        synsets: dict[str, dict[str, object]] = {}
-        for name in archive.namelist():
-            if not name.startswith(("noun.", "verb.", "adj.", "adv.")) or not name.endswith(".json"):
-                continue
-            data = json.loads(archive.read(name))
-            if isinstance(data, dict):
-                synsets.update(data)
-
-        rows: list[tuple[str, str, str, str | None, str | None, int]] = []
-        seen: set[tuple[str, str, str]] = set()
-        for name in wordnet_entry_filenames():
-            if name not in archive.namelist():
-                continue
-            entries = json.loads(archive.read(name))
-            if not isinstance(entries, dict):
-                continue
-            for word, parts in entries.items():
-                word_key = word.lower().replace("_", " ").strip()
-                if not word_key or not isinstance(parts, dict):
-                    continue
-                for wn_part, payload in parts.items():
-                    if wn_part not in {"n", "v", "a", "s", "r"} or not isinstance(payload, dict):
-                        continue
-                    normalized_part = "a" if wn_part == "s" else wn_part
-                    senses = payload.get("sense") or []
-                    for rank, sense in enumerate(senses):
-                        synset_id = sense.get("synset") if isinstance(sense, dict) else None
-                        synset = synsets.get(synset_id or "")
-                        if not synset:
-                            continue
-                        examples = synset.get("example") or []
-                        definitions = synset.get("definition") or []
-                        if not examples:
-                            continue
-                        for example in examples:
-                            sentence = str(example).strip()
-                            if not valid_example_sentence(sentence, word_key):
-                                continue
-                            key = (word_key, normalized_part, sentence)
-                            if key in seen:
-                                continue
-                            seen.add(key)
-                            rows.append(
-                                (
-                                    word_key,
-                                    normalized_part,
-                                    sentence,
-                                    "\n".join(str(item).strip() for item in definitions if str(item).strip()) or None,
-                                    synset_id,
-                                    rank,
-                                )
-                            )
-
-    db.execute("DROP TABLE IF EXISTS wordnet_examples")
-    db.execute(
-        """
-        CREATE TABLE wordnet_examples (
-            word_key TEXT NOT NULL,
-            part_group TEXT NOT NULL,
-            example_sentence TEXT NOT NULL,
-            definition TEXT,
-            synset_id TEXT,
-            sense_rank INTEGER NOT NULL DEFAULT 0
-        )
-        """
-    )
-    db.executemany(
-        """
-        INSERT INTO wordnet_examples (
-            word_key, part_group, example_sentence, definition, synset_id, sense_rank
-        )
-        VALUES (?, ?, ?, ?, ?, ?)
-        """,
-        rows,
-    )
-    db.execute("CREATE INDEX idx_wordnet_examples_word_part ON wordnet_examples(word_key, part_group, sense_rank)")
-    db.execute(
-        """
-        INSERT INTO metadata (key, value)
-        VALUES (?, ?)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value
-        """,
-        ("wordnet_lookup_signature", signature),
-    )
-    db.commit()
-
-
-def ranked_wordnet_example_candidates(word: str, part_of_speech: str, limit: int = 20) -> list[sqlite3.Row]:
-    if not word.strip() or not WORDNET_ZIP_PATH.exists():
-        return []
-    ensure_wordnet_lookup_index()
-    part_group = wordnet_part_group(part_of_speech)
-    if part_group not in {"n", "v", "a", "r"}:
-        return []
-    rows = get_db().execute(
-        """
-        SELECT example_sentence, definition, synset_id
-        FROM wordnet_examples
-        WHERE word_key = ? AND part_group = ?
-        ORDER BY sense_rank ASC, length(example_sentence) ASC
-        LIMIT 20
-        """,
-        (word.strip().lower(), part_group),
-    ).fetchall()
-    scored: list[tuple[tuple[int, int, int, int, str], sqlite3.Row]] = []
-    for row in rows:
-        sentence = row["example_sentence"]
-        if not usable_wordnet_example(sentence, word):
-            continue
-        score = sentence_quality_score(sentence, word, part_of_speech, source="wordnet")
-        if score[1] >= 6:
-            continue
-        scored.append((score, row))
-    scored.sort(key=lambda item: item[0])
-    return [row for _, row in scored[:limit]]
-
-
-def lookup_wordnet_example(word: str, part_of_speech: str) -> sqlite3.Row | None:
-    candidates = ranked_wordnet_example_candidates(word, part_of_speech, limit=1)
-    return candidates[0] if candidates else None
-
-
-def ensure_wiktionary_lookup_index(target_words: set[str] | None = None) -> None:
-    path = wiktionary_jsonl_path()
-    signature = wiktionary_source_signature()
-    if not path or not signature:
-        return
-
-    db = get_db()
-    existing = db.execute("SELECT value FROM metadata WHERE key = ?", ("wiktionary_lookup_signature",)).fetchone()
-    table_exists = db.execute(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
-        ("wiktionary_examples",),
-    ).fetchone()
-    definition_table_exists = db.execute(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
-        ("wiktionary_definitions",),
-    ).fetchone()
-    indexed_table_exists = db.execute(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
-        ("wiktionary_indexed_words",),
-    ).fetchone()
-    needs_rebuild = not (table_exists and definition_table_exists and indexed_table_exists and existing and existing["value"] == signature)
-    normalized_targets = {word.strip().lower() for word in target_words if word.strip()} if target_words is not None else None
-    if target_words is not None and not normalized_targets:
-        return
-    if not needs_rebuild and normalized_targets is None:
-        return
-
-    if not needs_rebuild and normalized_targets is not None:
-        placeholders = ",".join("?" for _ in normalized_targets)
-        indexed_rows = db.execute(
-            f"SELECT word_key FROM wiktionary_indexed_words WHERE word_key IN ({placeholders})",
-            sorted(normalized_targets),
-        ).fetchall()
-        indexed_words = {row["word_key"] for row in indexed_rows}
-        normalized_targets = normalized_targets - indexed_words
-        if not normalized_targets:
-            return
-
-    if needs_rebuild:
-        db.execute("DROP TABLE IF EXISTS wiktionary_examples")
-        db.execute("DROP TABLE IF EXISTS wiktionary_definitions")
-        db.execute("DROP TABLE IF EXISTS wiktionary_indexed_words")
-        db.execute(
-            """
-            CREATE TABLE wiktionary_examples (
-                word_key TEXT NOT NULL,
-                part_group TEXT NOT NULL,
-                example_sentence TEXT NOT NULL,
-                definition TEXT,
-                example_type TEXT,
-                sense_tags TEXT,
-                sense_rank INTEGER NOT NULL DEFAULT 0,
-                example_rank INTEGER NOT NULL DEFAULT 0
-            )
-            """
-        )
-        db.execute(
-            """
-            CREATE TABLE wiktionary_definitions (
-                word_key TEXT NOT NULL,
-                part_group TEXT NOT NULL,
-                definition TEXT NOT NULL,
-                sense_tags TEXT,
-                sense_rank INTEGER NOT NULL DEFAULT 0
-            )
-            """
-        )
-        db.execute(
-            """
-            CREATE TABLE wiktionary_indexed_words (
-                word_key TEXT PRIMARY KEY
-            )
-            """
-        )
-        db.execute(
-            """
-            INSERT INTO metadata (key, value)
-            VALUES (?, ?)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value
-            """,
-            ("wiktionary_lookup_signature", signature),
-        )
-    else:
-        db.execute("DROP INDEX IF EXISTS idx_wiktionary_examples_word_part")
-        db.execute("DROP INDEX IF EXISTS idx_wiktionary_definitions_word_part")
-
-    words_to_index = normalized_targets
-
-    rows: list[tuple[str, str, str, str | None, str | None, str | None, int, int]] = []
-    definition_rows: list[tuple[str, str, str, str | None, int]] = []
-    seen: set[tuple[str, str, str]] = set()
-    seen_definitions: set[tuple[str, str, str]] = set()
-
-    def flush_rows() -> None:
-        nonlocal rows, definition_rows
-        if rows:
-            db.executemany(
-                """
-                INSERT INTO wiktionary_examples (
-                    word_key, part_group, example_sentence, definition,
-                    example_type, sense_tags, sense_rank, example_rank
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                rows,
-            )
-        if definition_rows:
-            db.executemany(
-                """
-                INSERT INTO wiktionary_definitions (
-                    word_key, part_group, definition, sense_tags, sense_rank
-                )
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                definition_rows,
-            )
-        rows = []
-        definition_rows = []
-
-    with path.open("rt", encoding="utf-8") as handle:
-        for line in handle:
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if entry.get("lang_code") != "en":
-                continue
-            word_key = str(entry.get("word") or "").lower().strip()
-            if words_to_index is not None and word_key not in words_to_index:
-                continue
-            part_group = normalize_wiktionary_pos(str(entry.get("pos") or ""))
-            if not word_key or part_group not in {"n", "v", "adj", "adv", "pron", "prep", "conj", "interj", "num", "det", "phrase"}:
-                continue
-            senses = entry.get("senses") or []
-            if not isinstance(senses, list):
-                continue
-            for sense_rank, sense in enumerate(senses):
-                if not isinstance(sense, dict):
-                    continue
-                definition = "\n".join(str(item).strip() for item in sense.get("glosses", []) if str(item).strip()) or None
-                sense_tags = ",".join(str(item).strip().lower() for item in sense.get("tags", []) if str(item).strip()) or None
-                tag_set = {str(tag).strip().lower() for tag in sense.get("tags", []) if str(tag).strip()}
-                if definition and not ({"archaic", "obsolete", "dated", "rare", "form-of"} & tag_set):
-                    definition_key = (word_key, part_group, definition)
-                    if definition_key not in seen_definitions:
-                        seen_definitions.add(definition_key)
-                        definition_rows.append((word_key, part_group, definition, sense_tags, sense_rank))
-                examples = sense.get("examples") or []
-                if not isinstance(examples, list):
-                    continue
-                for example in examples:
-                    if not isinstance(example, dict):
-                        continue
-                    sentence = extract_example_sentence(str(example.get("text") or ""), word_key)
-                    if not usable_wiktionary_example(sentence, word_key):
-                        continue
-                    key = (word_key, part_group, sentence)
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    rows.append(
-                        (
-                            word_key,
-                            part_group,
-                            sentence,
-                            definition,
-                            str(example.get("type") or ""),
-                            sense_tags,
-                            sense_rank,
-                            wiktionary_example_rank(example, sentence),
-                        )
-                    )
-                    if len(rows) >= 5000:
-                        flush_rows()
-                if len(definition_rows) >= 5000:
-                    flush_rows()
-    flush_rows()
-    if words_to_index is not None:
-        db.executemany(
-            "INSERT OR IGNORE INTO wiktionary_indexed_words (word_key) VALUES (?)",
-            [(word,) for word in sorted(words_to_index)],
-        )
-    db.execute("CREATE INDEX idx_wiktionary_examples_word_part ON wiktionary_examples(word_key, part_group, sense_rank, example_rank)")
-    db.execute("CREATE INDEX idx_wiktionary_definitions_word_part ON wiktionary_definitions(word_key, part_group, sense_rank)")
-    db.commit()
-
-
-def ranked_wiktionary_example_candidates(word: str, part_of_speech: str, limit: int = 8) -> list[sqlite3.Row]:
-    if not word.strip() or not wiktionary_jsonl_path():
-        return []
-    word_keys = sorted(spelling_variants(word))
-    lookup_groups = wiktionary_lookup_groups(part_of_speech, word)
-    group_placeholders = ",".join("?" for _ in lookup_groups)
-    key_placeholders = ",".join("?" for _ in word_keys)
-    rows = get_db().execute(
-        f"""
-        SELECT example_sentence, definition, example_type, sense_tags, part_group
-        FROM wiktionary_examples
-        WHERE word_key IN ({key_placeholders}) AND part_group IN ({group_placeholders})
-        ORDER BY example_rank ASC, sense_rank ASC, length(example_sentence) ASC
-        LIMIT 80
-        """,
-        (*word_keys, *lookup_groups),
-    ).fetchall()
-    dislike_tags = {"archaic", "obsolete", "dated", "rare"}
-    suitable: list[dict[str, object]] = []
-    for row in rows:
-        s = row["example_sentence"]
-        if not usable_wiktionary_example(s, word):
-            continue
-        tags = {tag.strip() for tag in str(row["sense_tags"] or "").split(",") if tag.strip()}
-        suitable.append((row, tags))
-    preferred = [(row, tags) for row, tags in suitable if not (dislike_tags & tags)]
-    candidates = preferred if preferred else suitable
-
-    scored: list[tuple[tuple[int, int, bool, int, int, str], dict[str, object]]] = []
-    for row, tags in candidates:
-        sentence = row["example_sentence"]
-        tg_pen = 0
-        if "obsolete" in tags: tg_pen += 18
-        if "archaic" in tags: tg_pen += 12
-        if "dated" in tags: tg_pen += 8
-        if "rare" in tags: tg_pen += 5
-        sq = sentence_quality_score(sentence, word, part_of_speech, source="wiktionary")
-        if sq[1] > 10:
-            continue
-        sp = 0 if english_word_count(sentence) >= 6 else 1
-        ranked_score = (tg_pen, sp, row["example_type"] == "quotation", sq[2], sq[3], sq[4])
-        scored.append((ranked_score, row))
-    scored.sort(key=lambda item: item[0])
-    return [row for _, row in scored[:limit]]
-
-
-def lookup_wiktionary_example(word: str, part_of_speech: str) -> sqlite3.Row | None:
-    ensure_wiktionary_lookup_index(set(spelling_variants(word)))
-    candidates = ranked_wiktionary_example_candidates(word, part_of_speech, limit=1)
-    return candidates[0] if candidates else None
-
-
-def lookup_wiktionary_definition(word: str, part_of_speech: str) -> str | None:
-    if not word.strip() or not wiktionary_jsonl_path():
-        return None
-    word_keys = sorted(spelling_variants(word))
-    ensure_wiktionary_lookup_index(set(word_keys))
-    lookup_groups = wiktionary_lookup_groups(part_of_speech, word)
-    group_placeholders = ",".join("?" for _ in lookup_groups)
-    key_placeholders = ",".join("?" for _ in word_keys)
-    rows = get_db().execute(
-        f"""
-        SELECT definition, sense_tags, part_group, sense_rank
-        FROM wiktionary_definitions
-        WHERE word_key IN ({key_placeholders}) AND part_group IN ({group_placeholders})
-        ORDER BY sense_rank ASC, length(definition) ASC
-        LIMIT 12
-        """,
-        (*word_keys, *lookup_groups),
-    ).fetchall()
-    if not rows:
-        return None
-    definitions: list[str] = []
-    seen: set[str] = set()
-    for row in rows:
-        tags = {tag.strip() for tag in str(row["sense_tags"] or "").split(",") if tag.strip()}
-        if {"archaic", "obsolete", "dated", "rare", "form-of"} & tags:
-            continue
-        definition = str(row["definition"] or "").strip()
-        if not definition or definition in seen:
-            continue
-        seen.add(definition)
-        definitions.append(definition)
-        if len(definitions) >= 4:
-            break
-    return "\n".join(definitions) if definitions else None
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 def refresh_example_candidate(
@@ -3548,8 +831,6 @@ def refresh_example_candidate(
     current = (current_sentence or "").strip()
     seen_sentences = {current} if current else set()
     candidates: list[sqlite3.Row] = []
-    ensure_wiktionary_lookup_index(set(spelling_variants(word)))
-
     for row in ranked_wiktionary_example_candidates(word, part_of_speech, limit=top_n):
         sentence = str(row["example_sentence"] or "").strip()
         if not sentence or sentence in seen_sentences:
@@ -3557,28 +838,7 @@ def refresh_example_candidate(
         seen_sentences.add(sentence)
         candidates.append(row)
 
-    if len(candidates) < top_n:
-        for row in ranked_wordnet_example_candidates(word, part_of_speech, limit=top_n):
-            sentence = str(row["example_sentence"] or "").strip()
-            if not sentence or sentence in seen_sentences:
-                continue
-            seen_sentences.add(sentence)
-            candidates.append(row)
-            if len(candidates) >= top_n:
-                break
-
     return random.choice(candidates[:top_n]) if candidates else None
-
-
-def lookup_wordnet_definition(word: str, part_of_speech: str) -> str | None:
-    lookup = lookup_wordnet_example(word, part_of_speech)
-    if lookup and lookup["definition"]:
-        return lookup["definition"]
-    return None
-
-
-def has_dictionary_example_support(word: str, part_of_speech: str) -> bool:
-    return lookup_wiktionary_example(word, part_of_speech) is not None or lookup_wordnet_example(word, part_of_speech) is not None
 
 
 def library_word_count() -> int:
@@ -3629,39 +889,6 @@ def fetch_word_range(start: int, end: int, columns: str = "*") -> list[sqlite3.R
     ).fetchall()
 
 
-def unsupported_dictionary_entries(start: int = 1, end: int = 100) -> tuple[list[sqlite3.Row], dict[str, int]]:
-    total = get_db().execute(
-        "SELECT COUNT(*) AS total FROM words WHERE library_id = ?",
-        (get_active_library_id(),),
-    ).fetchone()["total"]
-    if total:
-        start = max(1, min(start, int(total)))
-        end = max(start, min(end, int(total)))
-    else:
-        start = 0
-        end = 0
-    rows = fetch_word_range(start, end, "id, word, part_of_speech, meaning, status") if total else []
-    if wiktionary_jsonl_path():
-        ensure_wiktionary_lookup_index({str(row["word"]).strip().lower() for row in rows})
-    unsupported = [
-        row for row in rows
-        if not has_dictionary_example_support(str(row["word"]), str(row["part_of_speech"]))
-    ]
-    word_range = {
-        "start": start,
-        "end": end,
-        "count": len(rows),
-        "total": total,
-        "prev_start": max(1, start - max(1, end - start + 1)),
-        "prev_end": max(1, start - 1),
-        "next_start": min(total if total else 1, end + 1),
-        "next_end": min(total if total else 1, end + max(1, end - start + 1)),
-        "has_prev": bool(total and start > 1),
-        "has_next": bool(total and end < total),
-    }
-    return unsupported, word_range
-
-
 def enrich_entries_from_ecdict(entries: list[dict[str, str]]) -> int:
     enriched = 0
     cache: dict[str, sqlite3.Row | None] = {}
@@ -3692,100 +919,16 @@ def import_entries(
     library_id: int | None = None,
     update_existing: bool = True,
 ) -> tuple[int, int, int]:
-    db = get_db()
     if library_id is None:
         library_id = get_active_library_id()
-    inserted = 0
-    updated = 0
-    skipped = 0
-
-    for entry in entries:
-        entry["part_of_speech"] = normalize_user_pos(str(entry["part_of_speech"]))
-        existing = db.execute(
-            "SELECT id FROM words WHERE library_id = ? AND word = ? AND part_of_speech = ?",
-            (library_id, entry["word"], entry["part_of_speech"]),
-        ).fetchone()
-        if existing:
-            if not update_existing:
-                skipped += 1
-                continue
-            db.execute(
-                """
-                UPDATE words
-                SET meaning = ?,
-                    example_sentence = COALESCE(?, example_sentence),
-                    example_translation = COALESCE(?, example_translation),
-                    phonetic = COALESCE(?, phonetic),
-                    definition = COALESCE(?, definition),
-                    frequency = COALESCE(?, frequency),
-                    source = COALESCE(?, source),
-                    source_tags = COALESCE(?, source_tags),
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ? AND library_id = ?
-                """,
-                (
-                    entry["meaning"],
-                    entry.get("example_sentence"),
-                    entry.get("example_translation"),
-                    entry.get("phonetic"),
-                    entry.get("definition"),
-                    entry.get("frequency"),
-                    entry.get("source"),
-                    entry.get("source_tags"),
-                    existing["id"],
-                    library_id,
-                ),
-            )
-            updated += 1
-        else:
-            db.execute(
-                """
-                INSERT INTO words (
-                    library_id, word, part_of_speech, meaning, example_sentence, example_translation,
-                    phonetic, definition, frequency, source, source_tags
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    library_id,
-                    entry["word"],
-                    entry["part_of_speech"],
-                    entry["meaning"],
-                    entry.get("example_sentence"),
-                    entry.get("example_translation"),
-                    entry.get("phonetic"),
-                    entry.get("definition"),
-                    entry.get("frequency"),
-                    entry.get("source"),
-                    entry.get("source_tags"),
-                ),
-            )
-            inserted += 1
-
-    db.commit()
-    return inserted, updated, skipped
+    return word_repository.import_entries(
+        get_db(), library_id, entries, normalize_user_pos,
+        lexicon_repository.sync_learning_word, update_existing,
+    )
 
 
 def fetch_words(status: str | None = None) -> list[sqlite3.Row]:
-    db = get_db()
-    library_id = get_active_library_id()
-    if status is None:
-        return db.execute(
-            """
-            SELECT * FROM words
-            WHERE library_id = ?
-            ORDER BY id ASC
-            """,
-            (library_id,),
-        ).fetchall()
-    return db.execute(
-        """
-        SELECT * FROM words
-        WHERE library_id = ? AND status = ?
-        ORDER BY id ASC
-        """,
-        (library_id, status),
-    ).fetchall()
+    return word_repository.fetch_all(get_db(), get_active_library_id(), status)
 
 
 def build_word_filter(search: str) -> tuple[str, list[str]]:
@@ -3879,23 +1022,11 @@ def fetch_words_page(
 
 
 def fetch_words_by_ids(ids: list[int]) -> list[sqlite3.Row]:
-    if not ids:
-        return []
-    placeholders = ",".join("?" for _ in ids)
-    library_id = get_active_library_id()
-    rows = get_db().execute(
-        f"SELECT * FROM words WHERE library_id = ? AND id IN ({placeholders}) ORDER BY id ASC",
-        [library_id, *ids],
-    ).fetchall()
-    by_id = {row["id"]: row for row in rows}
-    return [by_id[word_id] for word_id in ids if word_id in by_id]
+    return word_repository.fetch_by_ids(get_db(), get_active_library_id(), ids)
 
 
 def fetch_word(word_id: int) -> sqlite3.Row | None:
-    return get_db().execute(
-        "SELECT * FROM words WHERE id = ? AND library_id = ?",
-        (word_id, get_active_library_id()),
-    ).fetchone()
+    return word_repository.fetch_one(get_db(), get_active_library_id(), word_id)
 
 
 def clear_practice_session() -> None:
@@ -3914,6 +1045,7 @@ def clear_practice_session() -> None:
     session.pop("cloze_followup_active", None)
     session.pop("show_definition", None)
     session.pop("show_phonetic", None)
+    session.pop("practice_example", None)
 
 
 def redirect_back(default_endpoint: str = "index"):
@@ -3946,9 +1078,71 @@ def base_context() -> dict[str, object]:
     }
 
 
+def render_workspace(mode: str):
+    status = {
+        "home": STATUS_NEW,
+        "learned": STATUS_LEARNED,
+        "wrong": STATUS_WRONG,
+        "libraries": None,
+    }[mode]
+    endpoint = {"home": "index", "learned": "learned", "wrong": "wrong", "libraries": "libraries"}[mode]
+    edit_mode = mode == "libraries" and request.args.get("edit") == "1"
+    editor_panel = request.args.get("panel", "") if edit_mode else ""
+    if editor_panel not in {"", "new", "add", "import", "format", "dedupe", "presets"}:
+        editor_panel = ""
+    try:
+        selected_unit = max(1, int(request.args.get("unit", "1")))
+    except ValueError:
+        selected_unit = 1
+    units = unit_repository.summaries(get_db(), get_active_library_id(), status)
+    if units:
+        selected_unit = min(selected_unit, units[-1]["number"])
+    unit_words = unit_repository.fetch(get_db(), get_active_library_id(), selected_unit, status)
+    selected_word = None
+    selected_examples: list[dict[str, object]] = []
+    selected_definition = ""
+    try:
+        selected_word_id = int(request.args.get("word", "0"))
+    except ValueError:
+        selected_word_id = 0
+    if selected_word_id:
+        candidate = fetch_word(selected_word_id)
+        if candidate is not None and (status is None or candidate["status"] == status):
+            selected_word = candidate
+            selected_examples = example_candidates_for_word(candidate, include_tagged=True)
+            selected_definition = lookup_wiktionary_definition(
+                str(candidate["word"]), str(candidate["part_of_speech"])
+            ) or str(candidate["definition"] or "")
+    return render_template(
+        "workspace.html",
+        workspace_mode=mode,
+        workspace_endpoint=endpoint,
+        edit_mode=edit_mode,
+        editor_panel=editor_panel,
+        page_title={"home": "待学", "learned": "复习", "wrong": "错词", "libraries": "词库"}[mode],
+        units=units,
+        selected_unit=selected_unit,
+        unit_words=unit_words,
+        selected_word=selected_word,
+        selected_examples=selected_examples,
+        selected_definition=selected_definition,
+        part_of_speech_options=PART_OF_SPEECH_OPTIONS,
+        add_word_messages=session.pop("add_word_messages", []),
+        workspace_add_draft=session.pop("workspace_add_draft", {}),
+        comparable_libraries=[
+            library for library in fetch_libraries()
+            if int(library["id"]) != get_active_library_id()
+        ],
+        hide_global_stats=True,
+        **base_context(),
+    )
+
+
 @app.route("/")
 def index():
     edit_mode = request.args.get("edit") == "1"
+    if not edit_mode:
+        return render_workspace("home")
     try:
         page = int(request.args.get("page", "1"))
     except ValueError:
@@ -3974,7 +1168,7 @@ def index():
         words=words,
         edit_mode=edit_mode,
         pagination=pagination,
-        sort_modes={"frequency": "Frequency", "alpha": "A-Z"},
+        sort_modes={"frequency": "按词频", "alpha": "按字母"},
         comparable_libraries=comparable_libraries,
         part_of_speech_options=PART_OF_SPEECH_OPTIONS,
         add_word_messages=session.pop("add_word_messages", []),
@@ -3994,35 +1188,40 @@ def select_library():
     try:
         library_id = int(request.form.get("library_id", ""))
     except ValueError:
-        flash("Choose a valid library.", "error")
+        flash("请选择有效的词库。", "error")
         return redirect(url_for("index"))
 
     if not fetch_library(library_id):
-        flash("That library does not exist.", "error")
+        flash("该词库不存在。", "error")
         return redirect(url_for("index"))
 
     session["active_library_id"] = library_id
     clear_practice_session()
-    return redirect(url_for("index"))
+    return redirect_back()
 
 
 @app.post("/libraries/add")
 def add_library():
     name = request.form.get("library_name", "").strip()
+    workspace_edit = request.form.get("workspace") == "1"
+    add_redirect = url_for("libraries", edit=1, panel="new") if workspace_edit else url_for("index")
     if not name:
-        flash("Library name is required.", "error")
-        return redirect(url_for("index"))
+        flash("请输入词库名称。", "error")
+        return redirect(add_redirect)
+    if len(name) > 80:
+        flash("词库名称不能超过 80 个字符。", "error")
+        return redirect(add_redirect)
 
     try:
         cursor = get_db().execute("INSERT INTO libraries (name) VALUES (?)", (name,))
         get_db().commit()
         session["active_library_id"] = int(cursor.lastrowid)
         clear_practice_session()
-        flash("Library created.", "success")
+        flash("词库已创建。", "success")
     except sqlite3.IntegrityError:
-        flash("A library with that name already exists.", "error")
+        flash("同名词库已经存在。", "error")
 
-    return redirect(url_for("index"))
+    return redirect(url_for("libraries", edit=1) if workspace_edit else url_for("index"))
 
 
 @app.post("/review/settings")
@@ -4041,7 +1240,7 @@ def update_review_settings():
         (target_count, get_active_library_id()),
     )
     get_db().commit()
-    flash(f"Review target set to {target_count} successful reviews.", "success")
+    flash(f"复习目标已设为累计答对 {target_count} 次。", "success")
     return redirect_back()
 
 
@@ -4061,44 +1260,53 @@ def update_wrong_settings():
         (target_count, get_active_library_id()),
     )
     get_db().commit()
-    flash(f"Wrong-word target set to {target_count} cumulative correct answers.", "success")
+    flash(f"错词巩固目标已设为累计答对 {target_count} 次。", "success")
     return redirect_back()
 
 
 @app.post("/import")
 def import_words():
+    workspace_edit = request.form.get("workspace") == "1"
+    try:
+        workspace_unit = max(1, int(request.form.get("unit", "1")))
+    except ValueError:
+        workspace_unit = 1
+    import_redirect = (
+        url_for("libraries", edit=1, unit=workspace_unit, panel="import")
+        if workspace_edit else url_for("index")
+    )
     uploaded = request.files.get("word_file")
     if not uploaded or uploaded.filename == "":
-        flash("Please choose a TXT or CSV file.", "error")
-        return redirect(url_for("index"))
+        flash("请选择 TXT 或 CSV 文件。", "error")
+        return redirect(import_redirect)
 
     try:
         entries, errors = parse_word_file(uploaded.filename, uploaded.read())
     except UnicodeDecodeError:
-        flash("Import failed: please use UTF-8 encoded TXT or CSV files.", "error")
-        return redirect(url_for("index"))
+        flash("导入失败：请使用 UTF-8 编码的 TXT 或 CSV 文件。", "error")
+        return redirect(import_redirect)
 
     enriched = 0
     if entries:
         enriched = enrich_entries_from_ecdict(entries)
         inserted, updated, _skipped = import_entries(entries)
         suffix = f" ECDICT filled {enriched} entries." if enriched else ""
-        flash(f"Imported {inserted} new words and updated {updated} existing entries.{suffix}", "success")
+        flash(f"已导入 {inserted} 个新词，并更新 {updated} 条已有词条。{suffix}", "success")
     if errors:
         preview = "; ".join(errors[:3])
-        suffix = "" if len(errors) <= 3 else f" And {len(errors) - 3} more."
-        flash(f"Some rows were skipped: {preview}.{suffix}", "error")
+        suffix = "" if len(errors) <= 3 else f" 另有 {len(errors) - 3} 条。"
+        flash(f"部分内容已跳过：{preview}。{suffix}", "error")
     if not entries and not errors:
-        flash("No usable words were found.", "error")
+        flash("没有找到可用词条。", "error")
 
-    return redirect(url_for("index"))
+    return redirect(import_redirect)
 
 
 @app.post("/examples/fill")
 def fill_auto_examples():
-    if not WORDNET_ZIP_PATH.exists() and not wiktionary_jsonl_path():
+    if not example_lookup_available():
         flash(
-            "Auto example sources were not found. Put Wiktionary JSONL in the project root or resources/wiktionary, or WordNet in resources/wordnet.",
+            "没有找到例句数据，请先安装 Wiktionary 数据。",
             "error",
         )
         return redirect(url_for("index", edit=1))
@@ -4113,15 +1321,15 @@ def fill_auto_examples():
         mode=mode,
     )
     if checked == 0:
-        flash(f"No words found in range {start}-{end}.", "success")
+        flash(f"第 {start}–{end} 条范围内没有词汇。", "success")
     elif mode == "refresh":
         flash(
-            f"Refreshed {matched} example sentences (from top-8 candidates) after checking {checked} words in range {start}-{end}.",
+            f"检查第 {start}–{end} 条中的 {checked} 个词后，已更新 {matched} 条默认例句。",
             "success",
         )
     else:
         flash(
-            f"Filled {matched} entries that had no example (existing examples were kept) after checking {checked} words in range {start}-{end}.",
+            f"检查第 {start}–{end} 条中的 {checked} 个词后，已为 {matched} 个缺少例句的词条补充默认例句。",
             "success",
         )
     return redirect(url_for("index", edit=1))
@@ -4131,13 +1339,13 @@ def fill_auto_examples():
 def import_ecdict():
     uploaded = request.files.get("ecdict_file")
     if not uploaded or uploaded.filename == "":
-        flash("Please choose an ECDICT CSV file.", "error")
+        flash("请选择 ECDICT CSV 文件。", "error")
         return redirect(url_for("index", edit=1))
 
     try:
         grouped, errors = parse_ecdict_csv(uploaded.read())
     except UnicodeDecodeError:
-        flash("ECDICT import failed: please use UTF-8 encoded CSV.", "error")
+        flash("ECDICT 导入失败：请使用 UTF-8 编码的 CSV 文件。", "error")
         return redirect(url_for("index", edit=1))
 
     if errors:
@@ -4146,19 +1354,36 @@ def import_ecdict():
 
     summaries = []
     first_library_id = None
+    preset_keys_by_name = {
+        str(config["name"]): key
+        for key, config in ECDICT_PRESET_LIBRARIES.items()
+    }
     for library_name, entries in grouped.items():
+        preset_key = preset_keys_by_name.get(library_name)
+        if preset_key:
+            entries, stats = apply_exam_policy(get_db(), preset_key, entries)
+            if stats.get("wiktionary_definitions_unavailable"):
+                summaries.append(f"{library_name}：缺少 Wiktionary 英文释义索引，已跳过")
+                continue
+            removed = int(stats.get("total", 0)) - len(entries)
+            if not entries:
+                summaries.append(f"{library_name}：没有通过英文释义与难度校验的词条")
+                continue
+        else:
+            removed = 0
         library_id = get_or_create_library(library_name)
         reset_ecdict_library(library_id)
         if first_library_id is None:
             first_library_id = library_id
         inserted, _updated, _skipped = import_entries(entries, library_id=library_id)
-        summaries.append(f"{library_name}: {inserted} added")
+        removed_note = f"，剔除 {removed} 个" if removed else ""
+        summaries.append(f"{library_name}：新增 {inserted} 个{removed_note}")
 
     if first_library_id is not None:
         session["active_library_id"] = first_library_id
         clear_practice_session()
 
-    flash("ECDICT import complete. " + "; ".join(summaries), "success")
+    flash("ECDICT 导入完成。" + "；".join(summaries), "success")
     return redirect(url_for("index"))
 
 
@@ -4173,14 +1398,56 @@ def load_preset_entries(preset_key: str) -> tuple[str, list[dict[str, str]] | No
     after flashing an appropriate message."""
     preset = ECDICT_PRESET_LIBRARIES.get(preset_key)
     if not preset:
-        flash("Choose a valid preset library.", "error")
+        flash("请选择有效的预设词库。", "error")
         return "", None
+
+    # Release and web deployments use the normalized lookup cache, avoiding a
+    # 63 MB CSV download and parse in the user's request.
+    try:
+        preset_tags = set(preset["tags"])
+        clauses = " OR ".join("source_tags LIKE ?" for _ in preset_tags)
+        rows = get_db().execute(
+            f"""
+            SELECT word, part_of_speech, meaning, phonetic,
+                   definition, frequency, source_tags
+            FROM ecdict_preset_entries
+            WHERE {clauses}
+            ORDER BY CASE WHEN frequency IS NULL THEN 1 ELSE 0 END,
+                     frequency, lower(word), part_of_speech
+            """,
+            [f"%{tag}%" for tag in sorted(preset_tags)],
+        ).fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    indexed_entries = [
+        {
+            "word": row["word"],
+            "part_of_speech": row["part_of_speech"],
+            "meaning": row["meaning"],
+            "phonetic": row["phonetic"],
+            "definition": row["definition"],
+            "frequency": row["frequency"],
+            "source": "ECDICT",
+            "source_tags": row["source_tags"],
+        }
+        for row in rows
+        if split_ecdict_tags(str(row["source_tags"] or "")) & preset_tags
+    ]
+    if indexed_entries:
+        filtered, stats = apply_exam_policy(get_db(), preset_key, indexed_entries)
+        if stats.get("wiktionary_definitions_unavailable"):
+            flash("Wiktionary 英文释义索引不可用，无法安全生成预设词库。", "error")
+            return str(preset["name"]), None
+        if not filtered:
+            flash(f"{preset['name']} 中没有通过英文释义与难度校验的词条。", "error")
+            return str(preset["name"]), None
+        return str(preset["name"]), filtered
 
     try:
         raw = load_ecdict_data()
     except Exception:
         flash(
-            "Could not load ECDICT data. Add resources/ecdict.csv when packaging, or use Edit library -> Import ECDICT with a local ecdict.csv file.",
+            "无法载入 ECDICT 数据，请先在资源目录中安装 ecdict.csv。",
             "error",
         )
         return "", None
@@ -4193,9 +1460,16 @@ def load_preset_entries(preset_key: str) -> tuple[str, list[dict[str, str]] | No
     library_name = str(preset["name"])
     entries = grouped.get(library_name, [])
     if not entries:
-        flash(f"No words found for {library_name} in ECDICT.", "error")
+        flash(f"ECDICT 中没有找到 {library_name} 对应的词汇。", "error")
         return library_name, None
-    return library_name, entries
+    filtered, stats = apply_exam_policy(get_db(), preset_key, entries)
+    if stats.get("wiktionary_definitions_unavailable"):
+        flash("Wiktionary 英文释义索引不可用，无法安全生成预设词库。", "error")
+        return library_name, None
+    if not filtered:
+        flash(f"{library_name} 中没有通过英文释义与难度校验的词条。", "error")
+        return library_name, None
+    return library_name, filtered
 
 
 def unique_library_name(base_name: str) -> str:
@@ -4243,7 +1517,7 @@ def create_ecdict_preset():
     session["active_library_id"] = library_id
     clear_pending_preset()
     clear_practice_session()
-    flash(f"{library_name} library rebuilt: {inserted} words added.", "success")
+    flash(f"{library_name} 词库已重建：新增 {inserted} 个词。", "success")
     return redirect(url_for("index"))
 
 
@@ -4252,10 +1526,11 @@ def create_ecdict_preset_copy():
     """Build the preset into a new, separately named library so the user's
     existing edited copy is left untouched."""
     preset_key = request.form.get("preset_key", "").strip().lower()
+    workspace_edit = request.form.get("workspace") == "1"
     base_name, entries = load_preset_entries(preset_key)
     if entries is None:
         clear_pending_preset()
-        return redirect(url_for("index"))
+        return redirect(url_for("libraries", edit=1, panel="presets") if workspace_edit else url_for("index"))
 
     library_name = unique_library_name(base_name)
     library_id = get_or_create_library(library_name)
@@ -4263,8 +1538,8 @@ def create_ecdict_preset_copy():
     session["active_library_id"] = library_id
     clear_pending_preset()
     clear_practice_session()
-    flash(f"Created a separate copy \"{library_name}\": {inserted} words added.", "success")
-    return redirect(url_for("index"))
+    flash(f"已创建独立副本“{library_name}”：新增 {inserted} 个词。", "success")
+    return redirect(url_for("libraries") if workspace_edit else url_for("index"))
 
 
 @app.post("/preview")
@@ -4291,7 +1566,7 @@ def create_preview():
     ).fetchall()
     ids = [int(row["id"]) for row in rows]
     if not ids:
-        flash("There are no new words to study. Import words or review wrong words.", "error")
+        flash("当前没有可学习的新词，请先导入词汇或练习错词。", "error")
         return redirect(url_for("index"))
 
     session["practice_ids"] = ids
@@ -4310,14 +1585,20 @@ def create_preview():
 def preview():
     words = fetch_words_by_ids([int(word_id) for word_id in session.get("practice_ids", [])])
     if not words:
-        flash("No practice session is selected.", "error")
+        flash("尚未选择练习内容。", "error")
         return redirect(url_for("index"))
     return render_template(
         "preview.html",
         words=words,
+        session_words=words,
+        mode=session.get("practice_mode", "normal"),
+        workspace_mode={"normal": "home", "review": "learned", "wrong": "wrong"}.get(
+            session.get("practice_mode", "normal"), "home"
+        ),
         prompt_mode=session.get("prompt_mode", PROMPT_MIXED),
         cloze_scope=cloze_scope_from_session(),
         show_phonetic=bool(session.get("show_phonetic", True)),
+        hide_global_stats=True,
         **base_context(),
     )
 
@@ -4337,7 +1618,7 @@ def start_practice():
 def start_due_review():
     due_count = review_due_count()
     if due_count <= 0:
-        flash("No words are due for review right now.", "error")
+        flash("当前没有到期需要复习的单词。", "error")
         return redirect_back()
 
     try:
@@ -4370,7 +1651,7 @@ def start_due_review():
     ).fetchall()
     ids = [int(row["id"]) for row in rows]
     if not ids:
-        flash("No words are due for review right now.", "error")
+        flash("当前没有到期需要复习的单词。", "error")
         return redirect_back()
 
     session["practice_ids"] = ids
@@ -4384,7 +1665,7 @@ def start_due_review():
     session["practice_round"] = 1
     session["awaiting_next"] = False
     session["last_result"] = None
-    return redirect(url_for("practice"))
+    return redirect(url_for("preview"))
 
 
 @app.route("/practice")
@@ -4393,7 +1674,7 @@ def practice():
     index = int(session.get("practice_index", 0))
     mode = session.get("practice_mode", "normal")
     if not ids:
-        flash("No active practice session.", "error")
+        flash("当前没有进行中的练习。", "error")
         return redirect(url_for("index"))
     if index >= len(ids):
         if mode in {"normal", "review"}:
@@ -4414,17 +1695,31 @@ def practice():
         else:
             return redirect(url_for("session_done"))
 
-    word = fetch_word(ids[index])
-    if word is None:
+    stored_word = fetch_word(ids[index])
+    if stored_word is None:
         session["practice_index"] = index + 1
         return redirect(url_for("practice"))
+    word = practice_word_with_example(stored_word)
+    # Prefer Wiktionary's exact POS-scoped glosses during practice. ECDICT's
+    # definition field may contain several parts of speech in one value.
+    if wiktionary_lookup_available():
+        matching_definition = lookup_wiktionary_definition(
+            str(word["word"]), str(word["part_of_speech"])
+        )
+        if matching_definition:
+            word["definition"] = matching_definition
+
+    next_word = fetch_word(ids[index + 1]) if index + 1 < len(ids) else None
 
     full_cloze_text = cloze_prompt(word["example_sentence"], word["word"])
     cloze_text = truncate_cloze_prompt(full_cloze_text) if full_cloze_text else ""
     prompt_mode = effective_prompt_mode(word)
     return render_template(
         "practice.html",
+        session_words=fetch_words_by_ids(ids),
+        workspace_mode={"normal": "home", "review": "learned", "wrong": "wrong"}.get(mode, "home"),
         word=word,
+        next_audio_word=str(next_word["word"]) if next_word is not None else "",
         index=index,
         total=len(ids),
         result=session.get("last_result"),
@@ -4452,9 +1747,10 @@ def submit_answer():
     if index >= len(ids):
         return redirect(url_for("session_done"))
 
-    word = fetch_word(ids[index])
-    if word is None:
+    stored_word = fetch_word(ids[index])
+    if stored_word is None:
         return redirect(url_for("practice"))
+    word = practice_word_with_example(stored_word)
 
     answer = request.form.get("answer", "").strip()
     prompt_mode = effective_prompt_mode(word)
@@ -4640,6 +1936,7 @@ def next_word():
 @app.route("/session-done")
 def session_done():
     mode = session.get("practice_mode", "normal")
+    session_words = fetch_words_by_ids([int(word_id) for word_id in session.get("practice_ids", [])])
     missed_words = []
     if mode == "normal":
         missed_words = fetch_words_by_ids([int(word_id) for word_id in session.get("missed_ids", [])])
@@ -4647,7 +1944,15 @@ def session_done():
     if not missed_words or mode == "review":
         clear_practice_session()
 
-    return render_template("session_done.html", mode=mode, missed_words=missed_words, **base_context())
+    return render_template(
+        "session_done.html",
+        mode=mode,
+        missed_words=missed_words,
+        session_words=session_words,
+        workspace_mode={"normal": "home", "review": "learned", "wrong": "wrong"}.get(mode, "home"),
+        hide_global_stats=True,
+        **base_context(),
+    )
 
 
 @app.post("/practice/finalize")
@@ -4694,28 +1999,33 @@ def finalize_practice():
 
     clear_practice_session()
     if selected_ids:
-        flash(f"Added {len(selected_ids)} words to wrong words.", "success")
+        flash(f"已将 {len(selected_ids)} 个词加入错词。", "success")
         return redirect(url_for("wrong"))
 
-    flash("Session saved. No words were added to wrong words.", "success")
+    flash("练习结果已保存，没有单词被加入错词。", "success")
     return redirect(url_for("index"))
 
 
 @app.route("/learned")
 def learned():
-    return render_template("learned.html", words=fetch_words(STATUS_LEARNED), **base_context())
+    return render_workspace("learned")
 
 
 @app.route("/wrong")
 def wrong():
-    return render_template("wrong.html", words=fetch_words(STATUS_WRONG), **base_context())
+    return render_workspace("wrong")
+
+
+@app.route("/libraries")
+def libraries():
+    return render_workspace("libraries")
 
 
 @app.post("/words/<int:word_id>/edit")
 def edit_word(word_id: int):
     existing_word = fetch_word(word_id)
     if existing_word is None:
-        flash("Word not found.", "error")
+        flash("没有找到该单词。", "error")
         return redirect(request.referrer or url_for("index"))
 
     word = request.form.get("word", "").strip()
@@ -4725,14 +2035,20 @@ def edit_word(word_id: int):
     example_sentence = request.form.get("example_sentence", "").strip()
 
     if not word or not part_of_speech or not meaning:
-        flash("Word, part of speech, and meaning are required.", "error")
+        flash("单词、词性和中文释义均为必填项。", "error")
         return redirect(request.referrer or url_for("index"))
     if example_sentence and not valid_example_sentence(example_sentence, word):
-        flash("Example sentence was not saved because it does not contain the target word.", "error")
+        flash("例句未保存：句子中没有包含目标词。", "error")
         return redirect(request.referrer or url_for("index", edit=1))
 
     entry = {"word": word, "part_of_speech": part_of_speech, "meaning": meaning}
-    enrich_entries_from_ecdict([entry])
+    # Editing a meaning or personal example should be instant. Dictionary
+    # enrichment is only relevant when the lexical identity actually changes.
+    if (
+        word.lower() != str(existing_word["word"]).lower()
+        or part_of_speech != str(existing_word["part_of_speech"])
+    ):
+        enrich_entries_from_ecdict([entry])
 
     try:
         get_db().execute(
@@ -4744,6 +2060,7 @@ def edit_word(word_id: int):
                 example_sentence = ?,
                 example_translation = NULL,
                 example_note = NULL,
+                example_source = ?,
                 phonetic = COALESCE(?, phonetic),
                 definition = COALESCE(?, definition),
                 frequency = COALESCE(?, frequency),
@@ -4757,6 +2074,7 @@ def edit_word(word_id: int):
                 part_of_speech,
                 meaning,
                 example_sentence or None,
+                "user" if example_sentence else None,
                 entry.get("phonetic"),
                 entry.get("definition"),
                 entry.get("frequency"),
@@ -4766,16 +2084,27 @@ def edit_word(word_id: int):
                 get_active_library_id(),
             ),
         )
+        lexicon_repository.sync_learning_word(get_db(), word_id)
+        example_repository.replace_user_example(get_db(), word_id, example_sentence or None)
         get_db().commit()
-        flash("Word updated.", "success")
+        flash("词条已更新。", "success")
     except sqlite3.IntegrityError:
-        flash("Update failed: that word and part of speech already exist.", "error")
+        flash("更新失败：该单词与词性的组合已存在。", "error")
 
     return redirect(request.referrer or url_for("index"))
 
 
 @app.post("/words/add")
 def add_word():
+    workspace_edit = request.form.get("workspace") == "1"
+    try:
+        workspace_unit = max(1, int(request.form.get("unit", "1")))
+    except ValueError:
+        workspace_unit = 1
+    add_redirect = (
+        url_for("libraries", edit=1, unit=workspace_unit, panel="add")
+        if workspace_edit else url_for("index", edit=1)
+    )
     words = request.form.getlist("word[]")
     parts = request.form.getlist("part_of_speech[]")
     meanings = request.form.getlist("meaning[]")
@@ -4795,51 +2124,82 @@ def add_word():
         if not word and not part_of_speech and not meaning and not example_sentence:
             continue
         if not word:
-            errors.append(f"Row {index + 1}: word is required.")
+            errors.append(f"第 {index + 1} 行：必须填写单词。")
+            continue
+        if workspace_edit and not raw_part:
+            errors.append(f"第 {index + 1} 行：请选择词性后再自动补全。")
             continue
         if meaning and not part_of_speech:
-            errors.append(f"Row {index + 1}: part of speech is required when a custom meaning is provided.")
+            errors.append(f"第 {index + 1} 行：填写自定义释义时必须选择词性。")
             continue
         if example_sentence and not valid_example_sentence(example_sentence, word):
-            errors.append(f"Row {index + 1}: example sentence must contain the target word.")
+            errors.append(f"第 {index + 1} 行：例句必须包含目标词。")
             continue
+        if workspace_edit:
+            if not wiktionary_part_lookup_available():
+                errors.append(f"第 {index + 1} 行：Wiktionary 数据不可用，暂时无法验证单词和词性。")
+                continue
+            if not wiktionary_part_exists(word, part_of_speech):
+                errors.append(f"第 {index + 1} 行：Wiktionary 中没有找到“{word} / {part_of_speech}”。")
+                continue
         row_entries: list[dict[str, object]] = []
         if part_of_speech and meaning:
             row_entries = [{"word": word, "part_of_speech": part_of_speech, "meaning": meaning}]
         else:
-            if ecdict_raw is None:
+            row_entries = ecdict_entries_for_word(word, part_of_speech, meaning)
+            if not row_entries and ecdict_raw is None:
                 try:
                     ecdict_raw = load_ecdict_data()
                 except Exception:
                     ecdict_raw = b""
-            row_entries = ecdict_entries_for_word(word, part_of_speech, meaning, raw=ecdict_raw or None)
+            if not row_entries and ecdict_raw:
+                row_entries = ecdict_entries_for_word(
+                    word, part_of_speech, meaning, raw=ecdict_raw
+                )
             if not row_entries:
-                errors.append(f"Row {index + 1}: '{word}' was not found in ECDICT. Add part of speech and Chinese meaning manually.")
+                errors.append(
+                    f"第 {index + 1} 行：没有找到“{word} / {part_of_speech}”的中文释义，请手动补充完整。"
+                )
                 continue
         for entry in row_entries:
             if example_sentence:
                 entry["example_sentence"] = example_sentence
+                entry["example_source"] = "user"
             entries.append(entry)
 
     if not entries:
-        message = " ".join(errors[:3]) if errors else "Add at least one word row."
-        session["add_word_messages"] = [("error", message)]
-        return redirect(url_for("index", edit=1))
+        message = " ".join(errors[:3]) if errors else "请至少添加一个词条。"
+        if workspace_edit:
+            session["workspace_add_draft"] = {
+                "word": words[0].strip() if words else "",
+                "part_of_speech": parts[0].strip() if parts else "",
+                "meaning": meanings[0].strip() if meanings else "",
+                "example_sentence": examples[0].strip() if examples else "",
+            }
+            flash(message, "error")
+        else:
+            session["add_word_messages"] = [("error", message)]
+        return redirect(add_redirect)
 
     enriched = enrich_entries_from_ecdict(entries)
     inserted, updated, skipped = import_entries(entries, update_existing=False)
-    suffix = f" ECDICT filled {enriched} entries." if enriched else ""
+    suffix = f" ECDICT 已补充 {enriched} 个词条。" if enriched else ""
     messages = []
     if inserted:
-        messages.append(("success", f"Added {inserted} new words.{suffix}"))
+        messages.append(("success", f"已添加 {inserted} 个新词。{suffix}"))
     if skipped:
-        messages.append(("success", f"{skipped} existing entries were already in this library and were left unchanged."))
+        messages.append(("success", f"{skipped} 个词条已存在，已保持不变。"))
     if errors:
-        messages.append(("error", f"These rows were not added: {' '.join(errors[:3])}"))
+        messages.append(("error", f"以下内容未添加：{' '.join(errors[:3])}"))
     if not messages:
-        messages.append(("error", "No new words were added."))
-    session["add_word_messages"] = messages
-    return redirect(url_for("index", edit=1))
+        messages.append(("error", "没有添加新词。"))
+    if workspace_edit:
+        session.pop("workspace_add_draft", None)
+        for category, message in messages:
+            flash(message, category)
+    else:
+        session["add_word_messages"] = messages
+    return redirect(add_redirect)
 
 
 @app.post("/words/save-page")
@@ -4908,6 +2268,7 @@ def save_page_edits():
                     example_sentence = ?,
                     example_translation = NULL,
                     example_note = NULL,
+                    example_source = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ? AND library_id = ?
                 """,
@@ -4916,17 +2277,22 @@ def save_page_edits():
                     update["part_of_speech"],
                     update["meaning"],
                     update["example_sentence"],
+                    "user" if update["example_sentence"] else None,
                     update["id"],
                     get_active_library_id(),
                 ),
             )
+            lexicon_repository.sync_learning_word(db, int(update["id"]))
+            example_repository.replace_user_example(
+                db, int(update["id"]), str(update["example_sentence"] or "") or None,
+            )
         db.commit()
     except sqlite3.IntegrityError:
         db.rollback()
-        flash("Save failed: duplicate word and part of speech in this library.", "error")
+        flash("保存失败：词库中存在重复的单词与词性组合。", "error")
         return redirect(url_for("index", **edit_redirect_args))
 
-    flash(f"Saved {len(updates)} words.", "success")
+    flash(f"已保存 {len(updates)} 个词条。", "success")
     # "Save" keeps the user in edit mode on the same page/search/sort; the
     # separate "Done" link exits without saving.
     if request.form.get("stay") == "1":
@@ -4938,9 +2304,11 @@ def save_page_edits():
 def delete_word(word_id: int):
     deleted = delete_word_ids({word_id}, get_active_library_id())
     if deleted:
-        flash("Word deleted.", "success")
+        flash("词条已删除，后续单词已自动补位。", "success")
     else:
-        flash("Word was not found in this library.", "error")
+        flash("当前词库中没有找到该词条。", "error")
+    if request.form.get("next"):
+        return redirect_back()
     return redirect(request.referrer or url_for("index"))
 
 
@@ -4952,92 +2320,50 @@ def bulk_delete_words():
     sort_mode = request.form.get("sort", SORT_FREQUENCY)
     if sort_mode not in LIBRARY_SORT_MODES:
         sort_mode = SORT_FREQUENCY
+    workspace_edit = request.form.get("workspace") == "1"
+    try:
+        workspace_unit = max(1, int(request.form.get("unit", "1")))
+    except ValueError:
+        workspace_unit = 1
     redirect_args = {"edit": 1, "page": page, "sort": sort_mode}
     if search:
         redirect_args["q"] = search
     if not selected_ids:
-        flash("Select at least one word to delete.", "error")
-        return redirect(url_for("index", **redirect_args))
+        flash("请至少选择一个要删除的词条。", "error")
+        return redirect(
+            url_for("libraries", edit=1, unit=workspace_unit)
+            if workspace_edit else url_for("index", **redirect_args)
+        )
 
     deleted = delete_word_ids(selected_ids, get_active_library_id())
-    flash(f"Deleted {deleted} selected words.", "success")
-    return redirect(url_for("index", **redirect_args))
-
-
-@app.post("/libraries/clean/preview")
-def preview_unsupported_entries():
-    start, end = parse_word_range("cleanup", default_start=1, default_end=100, max_span=2000)
-    unsupported, word_range = unsupported_dictionary_entries(start=start, end=end)
-    session["unsupported_cleanup_ids"] = [int(row["id"]) for row in unsupported]
-    session["unsupported_cleanup_start"] = word_range["start"]
-    session["unsupported_cleanup_end"] = word_range["end"]
-    return render_template(
-        "cleanup_preview.html",
-        unsupported_words=unsupported,
-        cleanup_range=word_range,
-        **base_context(),
-    )
-
-
-@app.post("/libraries/clean/confirm")
-def confirm_unsupported_cleanup():
-    stored_ids = {int(word_id) for word_id in session.get("unsupported_cleanup_ids", [])}
-    if not stored_ids:
-        flash("Run a cleanup preview first.", "error")
-        return redirect(url_for("index", edit=1))
-    selected_ids = {int(word_id) for word_id in request.form.getlist("word_ids") if word_id.isdigit()}
-    selected_ids = selected_ids & stored_ids
-    if not selected_ids:
-        flash("Select at least one unsupported entry to delete.", "error")
-        return redirect(url_for("index", edit=1))
-
-    placeholders = ",".join("?" for _ in selected_ids)
-    rows = get_db().execute(
-        f"""
-        SELECT id, word, part_of_speech
-        FROM words
-        WHERE library_id = ?
-          AND id IN ({placeholders})
-        """,
-        [get_active_library_id(), *sorted(selected_ids)],
-    ).fetchall()
-    if wiktionary_jsonl_path():
-        ensure_wiktionary_lookup_index({str(row["word"]).strip().lower() for row in rows})
-    still_unsupported = {
-        int(row["id"]) for row in rows
-        if not has_dictionary_example_support(str(row["word"]), str(row["part_of_speech"]))
-    }
-    deleted = delete_word_ids(still_unsupported, get_active_library_id()) if still_unsupported else 0
-    start = int(session.get("unsupported_cleanup_start", 1))
-    end = int(session.get("unsupported_cleanup_end", 100))
-    session.pop("unsupported_cleanup_ids", None)
-    session.pop("unsupported_cleanup_start", None)
-    session.pop("unsupported_cleanup_end", None)
-    flash(f"Removed {deleted} entries without Wiktionary or WordNet example support.", "success")
-    unsupported, word_range = unsupported_dictionary_entries(start=start, end=end)
-    session["unsupported_cleanup_ids"] = [int(row["id"]) for row in unsupported]
-    session["unsupported_cleanup_start"] = word_range["start"]
-    session["unsupported_cleanup_end"] = word_range["end"]
-    return render_template(
-        "cleanup_preview.html",
-        unsupported_words=unsupported,
-        cleanup_range=word_range,
-        **base_context(),
+    flash(f"已删除 {deleted} 个词条，后续单词已自动补位。", "success")
+    return redirect(
+        url_for("libraries", edit=1, unit=workspace_unit)
+        if workspace_edit else url_for("index", **redirect_args)
     )
 
 
 @app.post("/libraries/exclude")
 def exclude_library_words():
+    workspace_edit = request.form.get("workspace") == "1"
+    try:
+        workspace_unit = max(1, int(request.form.get("unit", "1")))
+    except ValueError:
+        workspace_unit = 1
+    dedupe_redirect = (
+        url_for("libraries", edit=1, unit=workspace_unit, panel="dedupe")
+        if workspace_edit else url_for("index", edit=1)
+    )
     try:
         source_library_id = int(request.form.get("source_library_id", ""))
     except ValueError:
-        flash("Choose a library to exclude.", "error")
-        return redirect(url_for("index", edit=1))
+        flash("请选择要用于排除的词库。", "error")
+        return redirect(dedupe_redirect)
 
     active_library_id = get_active_library_id()
     if source_library_id == active_library_id or not fetch_library(source_library_id):
-        flash("Choose a different existing library to exclude.", "error")
-        return redirect(url_for("index", edit=1))
+        flash("请选择另一个已有词库。", "error")
+        return redirect(dedupe_redirect)
 
     match_scope = request.form.get("match_scope", "word_part")
     db = get_db()
@@ -5075,14 +2401,14 @@ def exclude_library_words():
 
     word_ids = {int(row["id"]) for row in rows}
     if not word_ids:
-        flash("No overlapping words were found.", "success")
-        return redirect(url_for("index", edit=1))
+        flash("没有找到重合词条。", "success")
+        return redirect(dedupe_redirect)
 
     deleted = delete_word_ids(word_ids, active_library_id)
     source_library = fetch_library(source_library_id)
-    scope_label = "word only" if match_scope == "word" else "word + part"
-    flash(f"Excluded {deleted} words also found in {source_library['name']} ({scope_label}).", "success")
-    return redirect(url_for("index", edit=1))
+    scope_label = "仅单词" if match_scope == "word" else "单词 + 词性"
+    flash(f"已排除同时存在于 {source_library['name']} 的 {deleted} 个词条（{scope_label}）。", "success")
+    return redirect(dedupe_redirect)
 
 
 @app.post("/words/clear")
@@ -5090,7 +2416,7 @@ def clear_words():
     get_db().execute("DELETE FROM words WHERE library_id = ?", (get_active_library_id(),))
     get_db().commit()
     clear_practice_session()
-    flash("All words and learning records have been cleared.", "success")
+    flash("全部词条与学习记录已清空。", "success")
     return redirect(url_for("index"))
 
 
@@ -5098,7 +2424,7 @@ def clear_words():
 def start_wrong_review():
     due_count = wrong_due_count()
     if due_count <= 0:
-        flash("No wrong words are due for review today.", "error")
+        flash("今天没有到期的错词。", "error")
         return redirect(url_for("wrong"))
 
     try:
@@ -5122,7 +2448,7 @@ def start_wrong_review():
     ).fetchall()
     ids = [int(row["id"]) for row in rows[:requested_count]]
     if not ids:
-        flash("There are no wrong words to review.", "error")
+        flash("当前没有可练习的错词。", "error")
         return redirect(url_for("wrong"))
     session["practice_ids"] = ids
     session["practice_index"] = 0
@@ -5135,7 +2461,7 @@ def start_wrong_review():
     session["practice_round"] = 1
     session["awaiting_next"] = False
     session["last_result"] = None
-    return redirect(url_for("practice"))
+    return redirect(url_for("preview"))
 
 
 @app.post("/words/<int:word_id>/reset")
@@ -5183,4 +2509,8 @@ def mark_wrong(word_id: int):
 if __name__ == "__main__":
     # Werkzeug's debugger allows arbitrary Python execution from the browser;
     # keep it opt-in and never enable it in releases.
-    app.run(host="127.0.0.1", debug=os.environ.get("TYPENG_DEBUG") == "1")
+    app.run(
+        host="127.0.0.1",
+        debug=os.environ.get("TYPENG_DEBUG") == "1",
+        threaded=True,
+    )

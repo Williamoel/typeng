@@ -165,3 +165,27 @@ def test_spelling_variant_lookup_finds_examples(monkeypatch, tmp_path):
         result = app.lookup_wiktionary_example("judgement", "n")
         assert result is not None, "judgement should find example via judgment variant"
         assert "judgment" in result["example_sentence"]
+
+
+def test_wiktionary_definition_is_scoped_to_requested_pos(monkeypatch, tmp_path):
+    jsonl_path = tmp_path / "way.jsonl"
+    noun = _minimal_entry("way", "noun", ["This is the safest way home."])
+    noun["senses"][0]["glosses"] = ["a route or path"]
+    adverb = _minimal_entry("way", "adv", ["The station is way over there."])
+    adverb["senses"][0]["glosses"] = ["at a great distance"]
+    _write_jsonl(jsonl_path, [noun, adverb])
+    monkeypatch.setattr(app, "WIKTIONARY_JSONL_CANDIDATES", [jsonl_path])
+
+    with app.app.app_context():
+        app.init_db()
+        db = app.get_db()
+        db.execute("DROP TABLE IF EXISTS wiktionary_examples")
+        db.execute("DROP TABLE IF EXISTS wiktionary_definitions")
+        db.execute("DROP TABLE IF EXISTS wiktionary_indexed_words")
+        db.execute("DELETE FROM metadata WHERE key = 'wiktionary_lookup_signature'")
+        db.commit()
+        app.ensure_wiktionary_lookup_index({"way"})
+
+        definition = app.lookup_wiktionary_definition("way", "adv")
+        assert definition == "at a great distance"
+        assert "route" not in definition

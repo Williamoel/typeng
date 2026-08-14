@@ -1,0 +1,78 @@
+{
+  "policy": {
+    "zk": "A1+",
+    "gk": "A2+",
+    "cet4": "B1+",
+    "cet6": "B2+",
+    "kaoyan": "B2+",
+    "ielts": "B2+",
+    "toefl": "B2+",
+    "gre": "B2+"
+  },
+  "exams": {
+    "zk": {
+      "minimum": "A1",
+      "candidate_pairs": 2783,
+      "removed_wiktionary_pos": 89,
+      "removed_basic": 0,
+      "retained_pairs": 2694,
+      "retained_percent": 96.8
+    },
+    "gk": {
+      "minimum": "A2",
+      "candidate_pairs": 5777,
+      "removed_wiktionary_pos": 132,
+      "removed_basic": 1597,
+      "retained_pairs": 4048,
+      "retained_percent": 70.07
+    },
+    "cet4": {
+      "minimum": "B1",
+      "candidate_pairs": 5793,
+      "removed_wiktionary_pos": 82,
+      "removed_basic": 1695,
+      "retained_pairs": 4016,
+      "retained_percent": 69.33
+    },
+    "cet6": {
+      "minimum": "B2",
+      "candidate_pairs": 7807,
+      "removed_wiktionary_pos": 95,
+      "removed_basic": 2594,
+      "retained_pairs": 5118,
+      "retained_percent": 65.56
+    },
+    "kaoyan": {
+      "minimum": "B2",
+      "candidate_pairs": 7216,
+      "removed_wiktionary_pos": 95,
+      "removed_basic": 2667,
+      "retained_pairs": 4454,
+      "retained_percent": 61.72
+    },
+    "ielts": {
+      "minimum": "B2",
+      "candidate_pairs": 7327,
+      "removed_wiktionary_pos": 122,
+      "removed_basic": 2238,
+      "retained_pairs": 4967,
+      "retained_percent": 67.79
+    },
+    "toefl": {
+      "minimum": "B2",
+      "candidate_pairs": 9382,
+      "removed_wiktionary_pos": 105,
+      "removed_basic": 1898,
+      "retained_pairs": 7379,
+      "retained_percent": 78.65
+    },
+    "gre": {
+      "minimum": "B2",
+      "candidate_pairs": 9964,
+      "removed_wiktionary_pos": 90,
+      "removed_basic": 836,
+      "retained_pairs": 9038,
+      "retained_percent": 90.71
+    }
+  }
+}

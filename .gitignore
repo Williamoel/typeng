@@ -15,6 +15,7 @@ data/
 
 # Outdated local planning notes
 /PROJECT.md
+/feedback.md
 
 # Local crash/runtime files
 .sentry-native/
@@ -23,6 +24,7 @@ data/
 # Large dictionary/resource files
 /kaikki.org-dictionary-English.jsonl
 /resources/ecdict.csv
+/resources/efllex/*.tsv
 /resources/wiktionary/*.jsonl
 /resources/wordnet/*.zip
 /resources/tatoeba/

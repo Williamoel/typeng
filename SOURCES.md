@@ -28,24 +28,22 @@ Supported tags currently include:
 - `toefl` -> TOEFL
 - `gre` -> GRE
 
-## Open English WordNet
+## EFLLex
 
-Used as the built-in source for English definitions and example sentences behind
-the "auto examples" feature. Release packages already include this file, so auto
-examples work out of the box.
+Used as an independent A1-C1 frequency profile for vocabulary difficulty audits.
+The original TSV and derived profile remain separate from TypEng's MIT-licensed code.
 
-- Source: https://github.com/globalwordnet/english-wordnet (site: https://en-word.net)
-- Download: https://en-word.net/static/english-wordnet-2025-json.zip
-- License: CC-BY 4.0, as stated by the Open English WordNet project
-- Expected location: `resources/wordnet/english-wordnet-2025-json.zip`
+- Source: https://cental.uclouvain.be/cefrlex/efllex/download/
+- Paper: Dürlich and François, *EFLLex: A Graded Lexical Resource for Learners of English as a Foreign Language*, LREC 2018
+- License: CC BY-NC-SA 4.0
+- Expected location: `resources/efllex/EFLLex.tsv`
+- Transformation: underscores in multiword expressions are normalized to spaces; a provisional audit level records the earliest non-zero level, while all source frequencies remain available
 
 ## Wiktionary (Kaikki)
 
-The English Wiktionary JSONL export from Kaikki gives the richest, most natural
-example sentences and part-of-speech-matched definitions. It is large (about
-3 GB), so it is **not** included in release packages — you add it yourself if you
-want the best example coverage. TypEng works without it (WordNet covers most
-common words); Wiktionary simply improves example quality and breadth.
+The English Wiktionary JSONL export from Kaikki supplies part-of-speech-matched
+definitions and examples. It is large (about 3 GB), so it is **not** included in
+release packages; add it when automatic examples are needed.
 
 - Source: https://kaikki.org/dictionary/English/
 - Download (direct): https://kaikki.org/dictionary/English/kaikki.org-dictionary-English.jsonl
@@ -55,6 +53,12 @@ common words); Wiktionary simply improves example quality and breadth.
 - Expected location (either works):
   - next to the app executable: `kaikki.org-dictionary-English.jsonl`
   - or `resources/wiktionary/kaikki.org-dictionary-English.jsonl`
+
+TypEng ships `resources/wiktionary/exam-pos-index.tsv`, a 14,942-candidate,
+POS-only derivative of the Kaikki snapshot. It is used to validate normalized
+parts of speech without requiring users to download the 3 GB export. It contains
+no definitions or examples and remains subject to Wiktionary's CC-BY-SA 4.0 terms.
+Entries without usable examples are not removed.
 
 A step-by-step Chinese install guide is shipped with releases as
 `词典安装指南.pdf` (source: `docs/dictionary_setup.zh-CN.md`).
@@ -77,18 +81,19 @@ TypEng 会优先读取打包好的 `resources/ecdict.csv`。这是推荐的发�
 
 开发时如果没有 `resources/ecdict.csv`，TypEng 会依次尝试缓存的 `data/ecdict.csv`，再尝试从 ECDICT 在线下载。用户也可以在编辑界面提供本地的 `ecdict.csv` 文件。
 
-## Open English WordNet（英文词网）
+## EFLLex
 
-作为「自动填充例句」功能的**内置**英文释义和例句来源。发行包已经包含这个文件，所以自动例句开箱即用。
+作为独立的 A1-C1 教材频率画像，用于词汇难度审计。原始 TSV 和衍生画像与 TypEng 的 MIT 代码分开授权。
 
-- 来源：https://github.com/globalwordnet/english-wordnet （站点：https://en-word.net）
-- 下载：https://en-word.net/static/english-wordnet-2025-json.zip
-- 许可证：Open English WordNet 项目声明为 CC-BY 4.0
-- 存放位置：`resources/wordnet/english-wordnet-2025-json.zip`
+- 来源：https://cental.uclouvain.be/cefrlex/efllex/download/
+- 论文：Dürlich 与 François，*EFLLex: A Graded Lexical Resource for Learners of English as a Foreign Language*，LREC 2018
+- 许可证：CC BY-NC-SA 4.0
+- 存放位置：`resources/efllex/EFLLex.tsv`
+- 处理：多词表达的下划线转为空格；临时审计等级取最早非零等级，同时完整保留各等级频率
 
 ## Wiktionary（Kaikki 提取版）
 
-来自 Kaikki 的英文维基词典 JSONL 导出文件，能提供最丰富、最自然的例句和按词性匹配的英文释义。由于文件很大（约 3 GB），它**不**包含在发行包里——如果你想要最好的例句覆盖，需要自行添加。没有它 TypEng 也能正常工作（WordNet 已覆盖大部分常见词），Wiktionary 只是进一步提升例句的质量和广度。
+来自 Kaikki 的英文维基词典 JSONL 导出文件，提供按词性匹配的英文释义和例句。由于文件很大（约 3 GB），它**不**包含在发行包里；需要自动例句时请自行添加。
 
 - 来源：https://kaikki.org/dictionary/English/
 - 下载（直链）：https://kaikki.org/dictionary/English/kaikki.org-dictionary-English.jsonl

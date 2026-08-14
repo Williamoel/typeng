@@ -1,0 +1,87 @@
+.library-title-block { min-width: 0; }
+.library-switcher { min-width: min(100%, 440px); display: grid; gap: 10px; }
+.library-select-form, .library-add-form { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.library-select-form label { color: var(--muted); font-size: 12px; }
+.library-select-form select { min-width: 230px; min-height: 42px; }
+.library-add-form input[type="text"] { flex: 1 1 210px; min-height: 42px; font-size: 14px; }
+
+.common-libraries-panel, .preset-confirm-panel, .review-panel, .wrong-review-panel,
+.import-panel, .add-word-panel, .auto-examples-panel, .library-exclude-panel {
+  margin-bottom: 18px;
+  padding: 0 28px 28px;
+}
+
+.common-libraries-panel h2 { font-size: 18px; }
+.preset-actions { display: grid; grid-template-columns: repeat(8, minmax(70px,1fr)); gap: 8px; }
+.preset-actions form, .preset-actions button { width: 100%; margin: 0; }
+.preset-actions button { border-color: var(--line); background: transparent; color: var(--ink); font-weight: 520; }
+.preset-actions button:hover { border-color: var(--ink); background: var(--ink); color: #fff; }
+.preset-confirm-panel { border-left: 3px solid var(--ink); }
+.preset-confirm-actions { margin-top: 14px; display: flex; gap: 9px; flex-wrap: wrap; }
+
+.study-panel-wide { margin-bottom: 18px; padding: 0; overflow: hidden; }
+.study-panel-wide > .section-heading { padding: 25px 28px 14px; }
+.study-panel-wide > .section-heading h2 { font-size: 18px; }
+.study-session-boxes { display: grid; grid-template-columns: minmax(320px,.9fr) minmax(420px,1.1fr); }
+.study-session-box { min-width: 0; padding: 26px 28px; border-top: 1px solid var(--line); }
+.study-count-box { background: var(--ink); color: #fff; display: flex; align-items: center; }
+.study-controls { width: 100%; display: grid; grid-template-columns: auto 82px 1fr auto; align-items: center; gap: 12px; color: #bcbcb7; }
+.study-controls label { color: #fff; font-size: 17px; }
+.study-controls input { border-color: #555; background: #222; color: #fff; font-size: 18px; }
+.study-controls input:focus { border-color: #fff; box-shadow: 0 0 0 1px #fff; }
+.study-controls button { border-color: #fff; background: #fff; color: var(--ink); }
+.study-controls button:hover { background: #d8d8d4; border-color: #d8d8d4; }
+.study-options-box { display: grid; align-items: center; }
+.study-options-box .session-options { grid-template-columns: repeat(3, minmax(0,1fr)); width: 100%; }
+
+.review-options-form { display: grid; grid-template-columns: minmax(360px,1fr) minmax(320px,.9fr); gap: 14px; }
+.review-main-box, .review-options-box { min-width: 0; border-top: 1px solid var(--line); padding: 22px 0 0; }
+.review-main-box { display: grid; gap: 13px; }
+.review-start-row, .review-settings-inline { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.review-start-row label, .review-settings-inline label { font-weight: 650; }
+.review-start-row span, .review-settings-inline span { color: var(--muted); font-size: 13px; }
+.review-options-box .session-options { grid-template-columns: repeat(2, minmax(0,1fr)); }
+.hidden-settings-form { display: none; }
+
+.edit-tools-grid { margin-bottom: 18px; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 18px; }
+.compact-import-panel, .compact-exclude-panel { margin: 0; padding: 24px; }
+.compact-panel-title-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+.import-copy p, .compact-panel-note { margin: 7px 0 0; color: var(--muted); font-size: 13px; }
+.import-guide-line, .file-row { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.import-form { margin-top: 14px; display: grid; gap: 10px; }
+.file-row input { flex: 1; min-width: 0; }
+.exclude-form { margin-top: 14px; display: grid; gap: 10px; }
+.exclude-row { display: grid; grid-template-columns: 120px minmax(0,1fr); gap: 12px; align-items: center; }
+.exclude-row > span { font-weight: 620; }
+.match-scope { margin: 0; padding: 9px 12px; border: 1px solid var(--line); border-radius: 6px; display: flex; gap: 16px; }
+
+.auto-examples-form { display: grid; grid-template-columns: auto 86px auto 86px auto auto; align-items: center; gap: 10px; color: var(--muted); }
+.add-word-form { display: grid; gap: 12px; }
+.add-word-rows { display: grid; gap: 9px; }
+.add-word-row { display: grid; grid-template-columns: minmax(120px,.9fr) minmax(120px,.7fr) minmax(180px,1.2fr) minmax(260px,1.7fr) auto; gap: 9px; }
+.add-word-row input[type="text"], .add-word-row select { width: 100%; min-height: 40px; font-size: 14px; }
+.add-word-actions { display: flex; justify-content: flex-end; gap: 9px; }
+
+.edit-library-head, .library-view-head {
+  padding: 26px 24px 16px;
+  display: grid;
+  grid-template-columns: minmax(0,1fr) auto;
+  column-gap: 18px;
+  row-gap: 14px;
+  grid-template-areas: "title action" "search sort";
+}
+.library-title-group { grid-area: title; }
+.library-title-group p { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+.edit-library-search-grid, .library-view-search-grid { display: contents; }
+.edit-search-primary, .view-search-primary { grid-area: search; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.edit-search-primary button, .view-search-primary button, .edit-search-primary .secondary-button, .view-search-primary .secondary-button { min-height: 34px; }
+.edit-sort-control, .view-sort-control { grid-area: sort; justify-self: end; }
+.sort-control { color: var(--muted); display: inline-flex; align-items: center; gap: 8px; font-size: 12px; }
+.edit-actions-group, .view-edit-button { grid-area: action; justify-self: end; }
+.edit-actions-group { display: flex; gap: 8px; }
+
+.bulk-delete-form { border-top: 1px solid var(--line); }
+.bulk-toolbar { padding: 12px 24px; background: var(--paper); color: var(--muted); display: flex; justify-content: flex-end; align-items: center; gap: 14px; font-size: 12px; }
+.bulk-toolbar .check-label { margin-right: auto; }
+.keep-first-control { display: inline-flex; align-items: center; gap: 8px; }
+.keep-first-control input { width: 68px; min-height: 32px; }

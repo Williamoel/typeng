@@ -1,6 +1,9 @@
 (function () {
   const STORAGE_ACCENT = "typeng_pronunciation_accent";
   const STORAGE_AUTOPLAY = "typeng_pronunciation_autoplay";
+  const AUDIO_START_TIMEOUT_MS = 550;
+  const audioCache = new Map();
+  let activeAudio = null;
 
   function getAccent() {
     return localStorage.getItem(STORAGE_ACCENT) || "us";
@@ -23,9 +26,28 @@
     return `https://dict.youdao.com/dictvoice?type=${type}&audio=${encodeURIComponent(word)}`;
   }
 
-  function fallbackYoudaoUrl(word, accent) {
-    const type = accent === "uk" ? "1" : "2";
-    return `https://dict.youdao.com/dictvoice?type=${type}&le=eng&audio=${encodeURIComponent(word)}`;
+  function audioCacheKey(word, accent) {
+    return `${accent}:${word.toLowerCase()}`;
+  }
+
+  function audioForWord(word, accent) {
+    const key = audioCacheKey(word, accent);
+    if (!audioCache.has(key)) {
+      const audio = new Audio(youdaoUrl(word, accent));
+      audio.preload = "auto";
+      audioCache.set(key, audio);
+    }
+    return audioCache.get(key);
+  }
+
+  function preloadWord(word, accent) {
+    const audio = audioForWord(word, accent);
+    try {
+      audio.load();
+    } catch (_) {
+      // Some browsers defer media loading until a user gesture. Playback will
+      // still retry the same element when the learner asks for it.
+    }
   }
 
   function speakWithBrowser(word, accent) {
@@ -47,10 +69,15 @@
     return true;
   }
 
-  function playAudioUrl(url, timeoutMs) {
+  function playRecordedAudio(word, accent, timeoutMs) {
     return new Promise((resolve, reject) => {
-      const audio = new Audio(url);
+      const audio = audioForWord(word, accent);
       let settled = false;
+      if (activeAudio && activeAudio !== audio) {
+        activeAudio.pause();
+      }
+      activeAudio = audio;
+      audio.currentTime = 0;
       const timeout = window.setTimeout(() => {
         if (!settled) {
           settled = true;
@@ -59,7 +86,6 @@
         }
       }, timeoutMs);
 
-      audio.preload = "auto";
       audio.addEventListener("playing", () => {
         if (!settled) {
           settled = true;
@@ -94,19 +120,15 @@
     }
 
     try {
-      await playAudioUrl(youdaoUrl(word, accent), 1200);
+      await playRecordedAudio(word, accent, AUDIO_START_TIMEOUT_MS);
     } catch (_) {
-      try {
-        await playAudioUrl(fallbackYoudaoUrl(word, accent), 1200);
-      } catch (__) {
-        if (button) {
-          button.textContent = "Fallback";
-          window.setTimeout(() => {
-            button.textContent = originalText;
-          }, 900);
-        }
-        speakWithBrowser(word, accent);
+      if (button) {
+        button.textContent = "浏览器语音";
+        window.setTimeout(() => {
+          button.textContent = originalText;
+        }, 900);
       }
+      speakWithBrowser(word, accent);
     } finally {
       if (button) {
         button.removeAttribute("aria-busy");
@@ -172,9 +194,21 @@
     }
   }
 
+  function preloadUpcomingWord() {
+    const target = document.querySelector("[data-preload-word]");
+    if (!target || !isAutoplayEnabled()) {
+      return;
+    }
+    const word = target.getAttribute("data-preload-word");
+    if (word) {
+      preloadWord(word, getAccent());
+    }
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
     bindPronunciationSettings();
     bindPlayButtons();
+    preloadUpcomingWord();
     bindAutoPlay();
   });
 })();

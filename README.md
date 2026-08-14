@@ -150,7 +150,7 @@ So TypEng is the tool I always wanted: use preset exam libraries directly, or im
 
 - Supports cloze practice based on example sentences.
 - Users can manually add their own example sentences for words.
-- If users do not have examples, TypEng can automatically match examples from local Wiktionary / WordNet resources.
+- If users do not have examples, TypEng can automatically match examples from a local Wiktionary resource.
 - `With cloze` mode: normal spelling practice first, then cloze practice for words that have examples.
 - `Only in cloze` mode: use cloze when an example exists; if no example exists, fall back to normal spelling practice.
 - Cloze practice accepts both the entry's base word and the actual form in the sentence, and shows the correct sentence form when needed.
@@ -161,7 +161,7 @@ So TypEng is the tool I always wanted: use preset exam libraries directly, or im
 - Supports TXT and CSV word-list imports.
 - Supports manually adding words and editing libraries.
 - Supports user-defined Chinese meanings, parts of speech, and example sentences.
-- Uses ECDICT tags to generate preset libraries such as CET4, CET6, IELTS, TOEFL, GRE, Gaokao, Zhongkao, and Kaoyan.
+- Uses ECDICT tags to generate preset libraries, validates normalized parts of speech against Wiktionary, and removes only EFLLex-confirmed vocabulary below the exam threshold.
 - Supports excluding overlapping words between libraries, which helps users remove already-mastered basic words from higher-level libraries.
 
 ### Parts of speech and definitions
@@ -221,18 +221,20 @@ resources/wiktionary/kaikki.org-dictionary-English.jsonl
 
 TypEng tries to filter out archaic, obsolete, dated, rare, inflection-only entries, and examples that are not suitable for learning.
 
-### Open English WordNet
+### EFLLex
 
-Open English WordNet is used as a fallback source for English definitions and examples.
+EFLLex supplies auditable A1-C1 textbook frequency profiles for vocabulary difficulty research.
+Its CC BY-NC-SA 4.0 data remains separately licensed from TypEng's MIT source code.
+TypEng currently stores the complete profile and a clearly marked provisional level; it does not
+present that value as an authoritative sense-level CEFR rating.
 
-Put the zip file here:
+For preset filtering, EFLLex has one deliberately narrow role: remove confirmed basic
+entries. Zhongkao keeps A1+, Gaokao A2+, CET4 B1+, and CET6/Kaoyan/IELTS/TOEFL/GRE
+keep B2+. Unclassified entries always remain.
 
-```text
-resources/wordnet/english-wordnet-2025-json.zip
-```
+Source: <https://cental.uclouvain.be/cefrlex/efllex/download/>
 
-Source: <https://github.com/globalwordnet/english-wordnet>  
-License: the Open English WordNet project states that it uses CC-BY 4.0.
+License: CC BY-NC-SA 4.0.
 
 ### Youdao Dictionary audio interface
 
@@ -285,16 +287,18 @@ Get the latest packages from the releases page:
 
 ### Linux
 
-1. Download `typeng-v0.1.0-linux-x64.zip`.
+1. Download `typeng-v0.2.0-linux-x64.zip`.
 2. Extract the folder, then run `./typeng` inside it.
 
-### Optional dictionary resources
+### Built-in lexicon cache
 
-Released packages include empty `resources/` folders but not the large
-dictionary files (ECDICT, Wiktionary, WordNet), which are big and carry their
-own licenses. To enable preset exam libraries, English definitions, and example
-sentences, drop those files into the extracted `resources/` folder as described
-in [resources/README.md](resources/README.md) and [SOURCES.md](SOURCES.md).
+Released packages contain a compact, preprocessed lexicon database and a small
+Wiktionary-derived POS-presence index, so preset
+exam libraries and CEFR profiles work without downloading or indexing raw ECDICT
+or EFLLex files. Wiktionary remains the optional source for automatic English
+definitions and examples. Raw sources
+are maintainer inputs for rebuilding the cache or dictionary research; see
+[resources/README.md](resources/README.md) and [SOURCES.md](SOURCES.md).
 
 Maintainers who want to build the packages themselves can follow
 [PACKAGING.md](PACKAGING.md).
@@ -379,7 +383,12 @@ Wrong words are reviewed daily. If a wrong word is answered correctly but has no
 ## Project Structure
 
 ```text
-app.py                 Flask application and core logic
+app.py                 Flask routes and request adapters
+typeng/domain.py       independently testable domain rules
+typeng/dictionaries/   ECDICT and Wiktionary adapters
+typeng/repositories/   SQLite persistence boundary
+typeng/services/       learning and review use cases
+typeng/schema.py       database schema and migrations
 templates/             Jinja templates
 static/                CSS and browser JavaScript
 data/                  local SQLite database and generated caches
@@ -387,11 +396,13 @@ resources/             optional local dictionary resources
 samples/               sample import files
 ```
 
+Lexical data now follows a `Word → Sense → Example` model, separated from per-library learning progress. See the [architecture notes](docs/architecture.zh-CN.md) for details.
+
 ## Development Status
 
 TypEng is an actively maintained open-source project. Multi-platform desktop packages
 (Windows, macOS, Linux) are built and released automatically via GitHub Actions.
-v0.1.2 as of July 2026.
+v0.2.0 as of August 2026.
 
 Areas being worked on:
 

@@ -1,50 +1,48 @@
 {% extends "base.html" %}
-
-{% block title %}TypEng - Preview{% endblock %}
+{% block title %}TypEng · 练习预览{% endblock %}
+{% block body_class %}workspace-page practice-workspace-page{% endblock %}
 
 {% block content %}
-<section class="panel hero-panel">
-  <div>
-    <p class="eyebrow">Preview</p>
-    <h1>Read these words once before typing.</h1>
-    {% if cloze_scope == "with" %}
-      <p class="panel-note">Practice mode: standard typing, then a cloze round for words with examples.</p>
-    {% elif prompt_mode == "audio" %}
-      <p class="panel-note">Practice mode: audio only. The test will hide Chinese meanings.</p>
-    {% elif prompt_mode == "chinese" %}
-      <p class="panel-note">Practice mode: Chinese prompt. Pronunciation is available manually.</p>
-    {% elif prompt_mode == "cloze" and cloze_scope == "only" %}
-      <p class="panel-note">Practice mode: only in cloze.</p>
-    {% else %}
-      <p class="panel-note">Practice mode: Chinese + audio.</p>
-    {% endif %}
-  </div>
-  <form action="{{ url_for('start_practice') }}" method="post">
-    <button type="submit">Start Practice</button>
-  </form>
-</section>
+<section class="split-workspace">
+  {% include "_workspace_context.html" %}
+  <main class="task-pane preview-pane">
+    <a class="context-back" href="{% if mode == 'review' %}{{ url_for('learned') }}{% elif mode == 'wrong' %}{{ url_for('wrong') }}{% else %}{{ url_for('index') }}{% endif %}">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12.5 4.5-5 5 5 5M8 9.5h7"/></svg>
+      修改设置
+    </a>
+    <header class="task-intro preview-head">
+      <p class="eyebrow">预览</p>
+      <h1>本组单词</h1>
+      <p>{{ words|length }} 个词 · {% if mode == "review" %}复习{% elif mode == "wrong" %}错词{% elif prompt_mode == "cloze" %}Cloze{% else %}新词{% endif %}</p>
+    </header>
 
-<section class="preview-list">
-  {% for word in words %}
-    <article class="word-card">
-      <div>
-        <h2>
-          {{ word.word }}
-          <button type="button" class="audio-inline" data-play-word="{{ word.word }}" aria-label="Play {{ word.word }}" title="Play pronunciation">Listen</button>
-        </h2>
-        <p>
-          {{ word.part_of_speech }}
-          {% if show_phonetic and word.phonetic %}<span class="phonetic">/{{ word.phonetic }}/</span>{% endif %}
-        </p>
-        {% if word.definition %}
-          <p class="small-definition">{{ word.definition|definition_lines(word.part_of_speech) }}</p>
-        {% endif %}
-        {% if prompt_mode == "cloze" and word.example_sentence %}
-          <p class="small-example">{{ word.example_sentence }}</p>
-        {% endif %}
-      </div>
-      <strong>{{ word.meaning }}</strong>
-    </article>
-  {% endfor %}
+    <div class="preview-grid">
+      {% for word in words %}
+        <article class="preview-word">
+          <div>
+            <div class="preview-word-title">
+              <h2>{{ word.word }}</h2>
+              <button type="button" class="audio-inline" data-play-word="{{ word.word }}" aria-label="播放 {{ word.word }}" title="播放发音">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 10v4h3l4 3V7l-4 3H5Zm10.5-.5a4 4 0 0 1 0 5m2-7a7 7 0 0 1 0 9"/></svg>
+              </button>
+            </div>
+            <p class="preview-meta">{{ word.part_of_speech }}{% if show_phonetic and word.phonetic %} · /{{ word.phonetic }}/{% endif %}</p>
+            {% set matching_definitions = word.definition|definition_items(word.part_of_speech) %}
+            {% if matching_definitions %}
+              <div class="small-definition preview-definitions">
+                <ol>{% for definition in matching_definitions %}<li>{{ definition }}</li>{% endfor %}</ol>
+              </div>
+            {% endif %}
+          </div>
+          <div class="preview-meaning">
+            <strong class="zh-meaning">{{ word.meaning }}</strong>
+          </div>
+        </article>
+      {% endfor %}
+    </div>
+    <form class="preview-start" action="{{ url_for('start_practice') }}" method="post">
+      <button type="submit" class="primary-wide">开始练习</button>
+    </form>
+  </main>
 </section>
 {% endblock %}

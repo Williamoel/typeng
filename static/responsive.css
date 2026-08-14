@@ -1,0 +1,54 @@
+@media (max-width: 1040px) {
+  :root { --sidebar: 184px; }
+  .shell { width: min(1180px, calc(100% - 40px)); }
+  .preset-actions { grid-template-columns: repeat(4, 1fr); }
+  .study-session-boxes { grid-template-columns: 1fr; }
+  .study-options-box .session-options { grid-template-columns: repeat(3, 1fr); }
+}
+
+@media (max-width: 760px) {
+  .app-sidebar { display: none; }
+  .app-content { margin-left: 0; }
+  .mobile-header {
+    min-height: 62px;
+    border-bottom: 1px solid var(--line);
+    background: var(--paper);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 0 18px;
+  }
+  .mobile-header nav { display: flex; gap: 13px; color: var(--muted); font-size: 12px; }
+  .shell { width: calc(100% - 28px); padding: 26px 0 48px; }
+  .hero-panel, .word-card { align-items: flex-start; flex-direction: column; }
+  h1 { font-size: 38px; }
+  .stats { grid-template-columns: repeat(2, 1fr); }
+  .stats div:nth-child(2) { border-right: 0; }
+  .stats div:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+  .study-options-box .session-options, .review-options-box .session-options, .session-options { grid-template-columns: 1fr; }
+  .study-controls { grid-template-columns: auto 76px 1fr; }
+  .study-controls button { grid-column: 1 / -1; width: 100%; }
+  .review-options-form, .edit-tools-grid, .docs-grid { grid-template-columns: 1fr; }
+  .edit-library-head, .library-view-head { grid-template-columns: 1fr; grid-template-areas: "title" "action" "search" "sort"; }
+  .edit-actions-group, .view-edit-button, .edit-sort-control, .view-sort-control { justify-self: start; }
+  .auto-examples-form, .add-word-row, .exclude-row { grid-template-columns: 1fr; }
+  .file-row { align-items: stretch; flex-direction: column; }
+  .add-word-actions { justify-content: stretch; flex-direction: column; }
+  .add-word-actions button { width: 100%; }
+  .pagination-bar, .pagination-bar nav, .page-jump, .bulk-toolbar { align-items: stretch; flex-direction: column; }
+  .table-row, .table-row.with-actions, .table-row.library-view-row, .table-row.edit-library-row { grid-template-columns: 1fr; gap: 5px; padding: 15px 18px; }
+  .table-head { display: none; }
+  .edit-row-fields { display: grid; gap: 8px; }
+  .done-actions { grid-template-columns: 1fr; }
+  .missed-item { grid-template-columns: auto 1fr; }
+  .preset-actions { grid-template-columns: repeat(2, 1fr); }
+  .practice-page .shell { width: calc(100% - 20px); padding-top: 10px; }
+  .practice-wrap { min-height: calc(100svh - 20px); }
+  .practice-card { min-height: calc(100svh - 92px); padding: 76px 20px 30px; }
+  .practice-audio { top: 18px; right: 18px; left: 18px; justify-content: center; flex-wrap: wrap; }
+  .practice-audio label:last-child { display: none; }
+  .cloze-meaning { font-size: 26px; }
+  .definition-prompt { font-size: 17px; }
+  .practice-card .cloze-prompt { font-size: var(--cloze-font-size, 29px); }
+}

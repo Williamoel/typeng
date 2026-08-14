@@ -1,30 +1,54 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}TypEng{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='8') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='library.css', v='6') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='practice.css', v='6') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='workspace.css', v='10') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='responsive.css', v='6') }}">
   <script src="{{ url_for('static', filename='audio.js') }}" defer></script>
   <script src="{{ url_for('static', filename='library.js') }}" defer></script>
 </head>
-<body>
-  <header class="topbar">
-    <a class="brand" href="{{ url_for('index') }}">TypEng</a>
-    <nav class="nav">
-      <a href="{{ url_for('index') }}">Library</a>
-      <a href="{{ url_for('learned') }}">Learned</a>
-      <a href="{{ url_for('wrong') }}">Wrong Words</a>
-    </nav>
-  </header>
+<body class="{% block body_class %}{% endblock %}">
+  <div class="app-frame">
+    <aside class="app-sidebar">
+      <a class="brand" href="{{ url_for('index') }}" aria-label="TypEng 待学">TypEng</a>
+      <nav class="side-nav" aria-label="主要功能">
+        <a class="{% if request.endpoint == 'index' %}active{% endif %}" href="{{ url_for('index') }}">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5h6.5A2.5 2.5 0 0 1 13 8v11H6a2 2 0 0 1-2-2V5.5Zm16 0h-4.5A2.5 2.5 0 0 0 13 8v11h5a2 2 0 0 0 2-2V5.5Z"/></svg>
+          <span>词库</span>
+        </a>
+        <a class="{% if request.endpoint == 'learned' %}active{% endif %}" href="{{ url_for('learned') }}">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4 4L19 6.5"/></svg>
+          <span>已掌握</span>
+        </a>
+        <a class="{% if request.endpoint == 'wrong' %}active{% endif %}" href="{{ url_for('wrong') }}">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v5m0 3.5v.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>
+          <span>错词</span>
+        </a>
+      </nav>
+      <p class="local-note"><span></span>本地存储 · 隐私保护</p>
+    </aside>
 
-  <main class="shell">
+    <div class="app-content">
+      <header class="mobile-header">
+        <a class="brand" href="{{ url_for('index') }}">TypEng</a>
+        <nav aria-label="移动端导航">
+          <a href="{{ url_for('index') }}">词库</a>
+          <a href="{{ url_for('learned') }}">已掌握</a>
+          <a href="{{ url_for('wrong') }}">错词</a>
+        </nav>
+      </header>
+      <main class="shell">
     {% if not hide_global_stats|default(false) %}
-      <section class="stats" aria-label="Vocabulary statistics">
-        <div><span>{{ total_count }}</span>Total</div>
-        <div><span>{{ new_count }}</span>New</div>
-        <div><span>{{ learned_count }}</span>Learned</div>
-        <div><span>{{ wrong_count }}</span>Wrong</div>
+      <section class="stats" aria-label="词汇统计">
+        <div><span>{{ total_count }}</span>全部</div>
+        <div><span>{{ new_count }}</span>新词</div>
+        <div><span>{{ learned_count }}</span>已掌握</div>
+        <div><span>{{ wrong_count }}</span>错词</div>
       </section>
     {% endif %}
 
@@ -38,7 +62,9 @@
       {% endif %}
     {% endwith %}
 
-    {% block content %}{% endblock %}
-  </main>
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </div>
 </body>
 </html>

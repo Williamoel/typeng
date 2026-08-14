@@ -1,96 +1,117 @@
 {% extends "base.html" %}
 
-{% block title %}TypEng - Practice{% endblock %}
+{% block title %}TypEng · 练习{% endblock %}
+{% block body_class %}practice-page workspace-page practice-workspace-page{% endblock %}
 
 {% block content %}
-<section class="practice-wrap" data-practice-center>
+<section class="split-workspace">
+{% include "_workspace_context.html" %}
+<main class="task-pane practice-task-pane"><section class="practice-wrap" data-practice-center>
+  <div class="practice-progress" aria-label="练习进度">
+    <span style="--session-progress: {{ (((index + 1) / total) * 100)|round(1) }}%"></span>
+  </div>
   <div class="practice-meta">
     <span>{{ index + 1 }} / {{ total }}</span>
     {% if mode == "wrong" %}
-      <span>Wrong-word daily review</span>
-      <span>{{ word.wrong_correct_count }} / {{ wrong_review_target_count }} correct</span>
-      <span>Round {{ practice_round }}</span>
+      <span>错词巩固</span>
+      <span>累计答对 {{ word.wrong_correct_count }} / {{ wrong_review_target_count }}</span>
+      <span>第 {{ practice_round }} 轮</span>
     {% elif mode == "review" %}
-      <span>Spaced review</span>
-      <span>{{ word.review_correct_count }} / {{ review_target_count }} reviews</span>
-      <span>Round {{ practice_round }}</span>
+      <span>间隔复习</span>
+      <span>累计复习 {{ word.review_correct_count }} / {{ review_target_count }}</span>
+      <span>第 {{ practice_round }} 轮</span>
     {% else %}
       {% if prompt_mode == "audio" %}
-        <span>Audio-only mode</span>
+        <span>仅发音提示</span>
       {% elif prompt_mode == "chinese" %}
-        <span>Chinese mode</span>
+        <span>中文提示</span>
       {% elif prompt_mode == "cloze" %}
-        <span>{% if cloze_followup_active %}Cloze follow-up{% elif cloze_scope == "only" %}Only in cloze{% else %}Cloze mode{% endif %}</span>
+        <span>{% if cloze_followup_active %}追加 Cloze{% elif cloze_scope == "only" %}仅 Cloze{% else %}Cloze{% endif %}</span>
       {% else %}
-        <span>Chinese + audio mode</span>
+        <span>中文与发音提示</span>
       {% endif %}
-      <span>Round {{ practice_round }}</span>
+      <span>第 {{ practice_round }} 轮</span>
       {% if missed_count %}
-        <span>{{ missed_count }} missed in this session</span>
+        <span>本次曾答错 {{ missed_count }} 个</span>
       {% endif %}
     {% endif %}
   </div>
 
-  <article class="practice-card"{% if not awaiting_next and prompt_mode not in ["chinese", "cloze"] %} data-auto-play-word="{{ word.word }}"{% endif %}>
+  <article class="practice-card"
+    {% if not awaiting_next and prompt_mode not in ["chinese", "cloze"] %}data-auto-play-word="{{ word.word }}"{% endif %}
+    {% if next_audio_word %}data-preload-word="{{ next_audio_word }}"{% endif %}>
     <div class="practice-audio{% if prompt_mode == 'chinese' %} muted-audio{% endif %}">
-      <button type="button" class="icon-button" data-play-word="{{ word.word }}" aria-label="Play pronunciation" title="Play pronunciation">Listen</button>
+      <button type="button" class="icon-button listen-button" data-play-word="{{ word.word }}" aria-label="播放发音" title="播放发音">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 10v4h3l4 3V7l-4 3H5Zm10.5-.5a4 4 0 0 1 0 5m2-7a7 7 0 0 1 0 9"/></svg>
+        播放
+      </button>
       <label>
-        Accent
+        口音
         <select data-pronunciation-accent>
-          <option value="us">US</option>
-          <option value="uk">UK</option>
+          <option value="us">美音</option>
+          <option value="uk">英音</option>
         </select>
       </label>
       <label class="check-label">
         <input type="checkbox" data-pronunciation-autoplay>
-        Auto-play
+        自动播放
       </label>
     </div>
-    <p class="part">
-      {{ word.part_of_speech }}
-      {% if show_phonetic and word.phonetic %}
-        <span class="phonetic">/{{ word.phonetic }}/</span>
-      {% endif %}
-    </p>
+    <div class="prompt-copy">
+      <p class="part">
+        {{ word.part_of_speech }}
+        {% if show_phonetic and word.phonetic %}
+          <span class="phonetic">/{{ word.phonetic }}/</span>
+        {% endif %}
+      </p>
 
-    {% if prompt_mode != "audio" %}
-      <p class="cloze-meaning">{{ word.meaning }}</p>
-    {% endif %}
-    {% if show_definition and word.definition %}
-      <p class="definition-prompt">{{ word.definition|definition_lines(word.part_of_speech) }}</p>
-    {% endif %}
+      {% if prompt_mode != "audio" %}
+        <p class="cloze-meaning">{{ word.meaning }}</p>
+      {% endif %}
+      {% set matching_definitions = word.definition|definition_items(word.part_of_speech) %}
+      {% if show_definition and matching_definitions %}
+        <div class="definition-prompt definition-list">
+          <span class="definition-pos">{{ word.part_of_speech|display_pos_label }}</span>
+          <ol>{% for definition in matching_definitions %}<li>{{ definition }}</li>{% endfor %}</ol>
+        </div>
+      {% endif %}
+    </div>
 
     {% if not awaiting_next %}
       {% if prompt_mode == "cloze" and cloze_text %}
         {% set cloze_parts = cloze_text.split('____', 1) %}
         {% set answer_limit = (cloze_answer or word.word)|length + 5 %}
         {% if word.example_note %}
-          <p class="example-note-warning" role="note">⚠️ 这个例句可能读起来偏怪：{{ word.example_note }}（来自词典中较少用的义项，仅供拼写练习参考）</p>
+          <p class="example-note-warning" role="note">提示：这个例句可能读起来偏生僻：{{ word.example_note }}（仅供拼写练习参考）</p>
         {% endif %}
         {% if cloze_truncated %}
-          <p class="example-note-warning" role="note">⚠️ 原句过长，cloze 练习仅展示包含目标词的核心部分（例句已在预习和词库中完整保留）</p>
+          <p class="example-note-warning" role="note">提示：原句过长，Cloze 仅展示包含目标词的核心部分，完整例句仍保留在词库中。</p>
         {% endif %}
         <form class="answer-form inline-answer-form" action="{{ url_for('submit_answer') }}" method="post" autocomplete="off">
           <h1 class="cloze-prompt inline-cloze">
-            <span>{{ cloze_parts[0] }}</span><input name="answer" type="text" aria-label="Missing word" maxlength="{{ answer_limit }}" style="--answer-ch: {{ answer_limit }};" autofocus required><span>{{ cloze_parts[1] if cloze_parts|length > 1 else "" }}</span>
+            <span>{{ cloze_parts[0] }}</span><input name="answer" type="text" aria-label="缺少的单词" maxlength="{{ answer_limit }}" style="--answer-ch: {{ answer_limit }};" autofocus required><span>{{ cloze_parts[1] if cloze_parts|length > 1 else "" }}</span>
           </h1>
-          <button type="submit">Submit</button>
+          {% if word.example_source == 'user' %}<p class="user-example-priority">我的例句</p>{% endif %}
+          <button type="submit" class="practice-submit">检查</button>
+          <p class="keyboard-hint">按 <kbd>Enter</kbd> 检查</p>
         </form>
       {% else %}
         {% set answer_limit = word.word|length + 5 %}
         <form class="answer-form underline-answer-form" action="{{ url_for('submit_answer') }}" method="post" autocomplete="off">
           {% if prompt_mode == "audio" %}
-            <h1 class="audio-prompt">Listen and type the word.</h1>
+            <h1 class="audio-prompt">听发音，输入单词</h1>
           {% endif %}
-          <input name="answer" type="text" aria-label="Answer" maxlength="{{ answer_limit }}" style="--answer-ch: {{ answer_limit }};" autofocus required>
-          <button type="submit">Submit</button>
+          <label class="answer-label" for="practice-answer">输入单词</label>
+          <input id="practice-answer" name="answer" type="text" aria-label="答案" maxlength="{{ answer_limit }}" style="--answer-ch: {{ answer_limit }};" autofocus required>
+          <button type="submit" class="practice-submit">检查</button>
+          <p class="keyboard-hint">按 <kbd>Enter</kbd> 检查</p>
         </form>
       {% endif %}
     {% else %}
       {% if result.correct %}
         <div class="feedback correct">
           {% if result.form_hint %}
-            <p>Correct. In this sentence, use:</p>
+            <p>正确。这个句子中应使用：</p>
             <strong>{{ result.cloze_answer }}</strong>
             {% if result.example_match %}
               <p class="feedback-example form-hint-example">
@@ -100,20 +121,20 @@
               <p class="feedback-example">{{ result.example_sentence }}</p>
             {% endif %}
           {% else %}
-            <p>Correct</p>
+            <p>正确</p>
             <strong>{{ result.word }}</strong>
           {% endif %}
         </div>
         <form action="{{ url_for('next_word') }}" method="post">
-          <button type="submit" name="action" value="next" autofocus>Next</button>
+          <button type="submit" class="practice-submit" name="action" value="next" autofocus>下一个</button>
         </form>
       {% else %}
         <div class="feedback wrong">
-          <p>Your answer: <span>{{ result.answer or "(empty)" }}</span></p>
-          <p>Correct answer:</p>
+          <p>你的答案：<span>{{ result.answer or "（未输入）" }}</span></p>
+          <p>正确答案：</p>
           <strong>{{ result.word }}</strong>
           {% if prompt_mode == "cloze" and result.cloze_answer and result.cloze_answer|lower != result.word|lower %}
-            <p>Sentence form: <span>{{ result.cloze_answer }}</span></p>
+            <p>句中形式：<span>{{ result.cloze_answer }}</span></p>
           {% endif %}
           {% if result.example_sentence %}
             <p class="feedback-example">{{ result.example_sentence }}</p>
@@ -121,13 +142,13 @@
         </div>
         <form class="choice-row" action="{{ url_for('next_word') }}" method="post">
           {% if mode == "wrong" %}
-            <button type="submit" name="action" value="next" autofocus>Continue</button>
+            <button type="submit" class="practice-submit" name="action" value="next" autofocus>继续</button>
           {% else %}
-            <button type="submit" name="action" value="next" autofocus>Continue</button>
+            <button type="submit" class="practice-submit" name="action" value="next" autofocus>继续</button>
           {% endif %}
         </form>
       {% endif %}
     {% endif %}
   </article>
-</section>
+</section></main></section>
 {% endblock %}

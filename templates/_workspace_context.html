@@ -1,0 +1,97 @@
+<aside class="context-pane">
+  <div class="context-rail">
+    <a class="brand" href="{{ url_for('index') }}">TypEng</a>
+    <nav class="workspace-nav" aria-label="主要功能">
+      <a class="{% if workspace_mode == 'home' %}active{% endif %}" href="{{ url_for('index') }}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 9 10 3.5 16.5 9v7.5h-5v-4h-3v4h-5Z"/></svg>待学</a>
+      <a class="{% if workspace_mode == 'learned' %}active{% endif %}" href="{{ url_for('learned') }}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10a6 6 0 1 0 2-4.47M4 4.5v4h4M7.5 10.2l1.7 1.7 3.6-4"/></svg>复习</a>
+      <a class="{% if workspace_mode == 'wrong' %}active{% endif %}" href="{{ url_for('wrong') }}"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><path d="M10 6.5v4.3M10 13.7v.1"/></svg>错词</a>
+      <a class="{% if workspace_mode == 'libraries' %}active{% endif %}" href="{{ url_for('libraries') }}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 4.5h5A2.5 2.5 0 0 1 11 7v9H6a2.5 2.5 0 0 1-2.5-2.5Zm13 0h-3A2.5 2.5 0 0 0 11 7v9h3a2.5 2.5 0 0 0 2.5-2.5Z"/></svg>词库</a>
+    </nav>
+    <span class="rail-foot">TYPE · LEARN</span>
+  </div>
+
+  <div class="context-main">
+    {% if session_words is defined %}
+      <header class="context-heading">
+        <span>本组单词</span>
+        <strong>{{ session_words|length }}</strong>
+      </header>
+      <div class="context-word-list session-word-list">
+        {% for item in session_words %}
+          <div class="context-word {% if word is defined and item.id == word.id %}selected{% endif %}">
+            <span>{{ item.word }}</span>
+            <small>{{ item.part_of_speech }} · <span class="zh-meaning-inline">{{ item.meaning }}</span></small>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <form class="context-library-select" action="{{ url_for('select_library') }}" method="post">
+        <input type="hidden" name="next" value="{{ request.full_path.rstrip('?') }}">
+        <label for="workspace-library">词库</label>
+        <select id="workspace-library" name="library_id" onchange="this.form.submit()">
+          {% for library in libraries %}
+            <option value="{{ library.id }}" {% if library.id == active_library.id %}selected{% endif %}>{{ library.name }} · {{ library.word_count }}</option>
+          {% endfor %}
+        </select>
+      </form>
+
+      {% if workspace_mode == 'libraries' %}
+        <div class="library-mode-bar">
+          {% if edit_mode %}
+            <a class="{% if editor_panel == 'new' %}active{% endif %}" href="{{ url_for('libraries', edit=1, unit=selected_unit, panel='new') }}">新建</a>
+            <a class="{% if editor_panel == 'add' %}active{% endif %}" href="{{ url_for('libraries', edit=1, unit=selected_unit, panel='add') }}">添加</a>
+            <a class="{% if editor_panel in ['import', 'format'] %}active{% endif %}" href="{{ url_for('libraries', edit=1, unit=selected_unit, panel='import') }}">导入</a>
+            <a class="{% if editor_panel == 'dedupe' %}active{% endif %}" href="{{ url_for('libraries', edit=1, unit=selected_unit, panel='dedupe') }}">去重</a>
+            <a class="{% if editor_panel == 'presets' %}active{% endif %}" href="{{ url_for('libraries', edit=1, unit=selected_unit, panel='presets') }}">预设</a>
+            <a class="finish-edit" href="{{ url_for('libraries', unit=selected_unit) }}">完成</a>
+          {% else %}
+            <span>浏览模式</span>
+            <a href="{{ url_for('libraries', edit=1, unit=selected_unit) }}">编辑</a>
+          {% endif %}
+        </div>
+      {% endif %}
+
+      <div class="unit-strip" aria-label="单元列表">
+        {% for item in units %}
+          <a class="{% if item.number == selected_unit %}active{% endif %}"
+             href="{{ url_for(workspace_endpoint, unit=item.number, edit=1 if edit_mode else None) }}">{{ item.number }}</a>
+        {% else %}
+          <span>暂无单词</span>
+        {% endfor %}
+      </div>
+
+      {% if edit_mode %}
+        <form class="workspace-selection-form" action="{{ url_for('bulk_delete_words') }}" method="post" data-bulk-delete-form>
+          <input type="hidden" name="workspace" value="1">
+          <input type="hidden" name="unit" value="{{ selected_unit }}">
+          <div class="context-word-list edit-context-word-list">
+            {% for item in unit_words %}
+              <div class="edit-context-row {% if selected_word and item.id == selected_word.id %}selected{% endif %}">
+                <input type="checkbox" name="word_ids" value="{{ item.id }}" data-word-select aria-label="选择 {{ item.word }}">
+                <a class="context-word" href="{{ url_for('libraries', edit=1, unit=selected_unit, word=item.id) }}">
+                  <span>{{ item.word }}</span>
+                  <small>{{ item.part_of_speech }} · <span class="zh-meaning-inline">{{ item.meaning }}</span></small>
+                </a>
+              </div>
+            {% endfor %}
+          </div>
+          <div class="workspace-bulk-bar">
+            <label><input type="checkbox" data-select-all-words> 全选本单元</label>
+            <span data-selected-count>已选择 0 个</span>
+            <button type="submit" class="danger" disabled data-bulk-delete-button>删除</button>
+          </div>
+        </form>
+      {% else %}
+        <div class="context-word-list">
+          {% for item in unit_words %}
+            <a class="context-word {% if selected_word and item.id == selected_word.id %}selected{% endif %}"
+               href="{{ url_for(workspace_endpoint, unit=selected_unit, word=item.id) }}">
+              <span>{{ item.word }}</span>
+              <small>{{ item.part_of_speech }} · <span class="zh-meaning-inline">{{ item.meaning }}</span></small>
+            </a>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endif %}
+  </div>
+</aside>

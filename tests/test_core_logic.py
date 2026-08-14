@@ -92,6 +92,7 @@ def test_normalize_user_pos_collapses_verb_variants():
     assert app.normalize_user_pos("vt") == "v"
     assert app.normalize_user_pos("vi") == "v"
     assert app.normalize_user_pos("verb") == "v"
+    assert app.normalize_user_pos("aux") == "v"
 
 
 def test_normalize_user_pos_known_parts():
@@ -102,6 +103,53 @@ def test_normalize_user_pos_known_parts():
 
 def test_normalize_user_pos_unknown_is_phrase():
     assert app.normalize_user_pos("gibberish") == "phrase"
+
+
+def test_cross_dictionary_pos_normalization():
+    assert app.normalize_part_group("auxiliary") == "v"
+    assert app.normalize_wiktionary_pos("proper noun") == "n"
+    assert app.normalize_wiktionary_pos("article") == "det"
+    assert app.normalize_wiktionary_pos("initialism") == "abbr"
+    assert app.wiktionary_lookup_groups("phrase", "account for") == [
+        "adj", "adv", "conj", "interj", "n", "phrase", "prep", "v"
+    ]
+
+
+def test_definition_items_keep_only_the_requested_part_of_speech():
+    value = "n. a route or path\nadv. at a great distance\nadv. by far"
+    assert app.definition_items(value, "adv") == ["at a great distance", "by far"]
+    assert app.definition_items(value, "n") == ["a route or path"]
+    assert app.definition_items(value, "v") == []
+
+
+def test_unlabeled_wiktionary_definitions_are_kept():
+    assert app.definition_items("at a great distance\nby a large amount", "adv") == [
+        "at a great distance", "by a large amount"
+    ]
+
+
+def test_wiktionary_usage_labels_are_concise_and_deduplicated():
+    assert app.wiktionary_usage_label("US,slang") == "美式 · 俚语"
+    assert app.wiktionary_usage_label("British,colloquial,informal") == "英式 · 非正式"
+
+
+def test_ecdict_translation_does_not_attach_inflection_notes_to_adjectives():
+    shot = "a. 杂色的, 交织着的, 破旧的\nshoot的过去式和过去分词"
+    beat = "a. 疲乏的, 颓废的\nbeat的过去式\n[计] 拍; 节拍"
+    assert app.split_ecdict_translation(shot, "adj") == [
+        ("adj", "杂色的, 交织着的, 破旧的")
+    ]
+    assert app.split_ecdict_translation(beat, "adj") == [
+        ("adj", "疲乏的, 颓废的")
+    ]
+
+
+def test_editor_parts_are_concise_wiktionary_groups():
+    values = dict(app.PART_OF_SPEECH_OPTIONS)
+    assert "aux" not in values
+    assert values["v"] == "v."
+    assert values["adv"] == "adv."
+    assert values["det"] == "det."
 
 
 # --- normalize_entry -------------------------------------------------------
@@ -271,6 +319,35 @@ def test_import_without_ecdict_resource_does_not_crash(monkeypatch, tmp_path):
         assert inserted == 1
 
 
+def test_data_migrations_run_once_per_schema_version(monkeypatch, tmp_path):
+    monkeypatch.setattr(app, "DB_PATH", tmp_path / "versioned.db")
+    monkeypatch.setattr(app, "PREBUILT_LEXICON_PATH", tmp_path / "missing-cache.db")
+    calls = {name: 0 for name in (
+        "clear_invalid_example_sentences",
+        "simplify_existing_example_translations",
+        "merge_verb_part_duplicates",
+        "migrate_plural_phrase_entries",
+        "migrate_inferred_phrase_entries",
+    )}
+
+    for name in calls:
+        def record(_db, migration_name=name):
+            calls[migration_name] += 1
+        # Migration implementations now belong to the schema module; app keeps
+        # aliases only for backwards compatibility.
+        monkeypatch.setattr(app._schema, name, record)
+
+    with app.app.app_context():
+        app.init_db()
+        app.init_db()
+        version = app.get_db().execute(
+            "SELECT value FROM metadata WHERE key = 'app_schema_version'"
+        ).fetchone()["value"]
+
+    assert version == str(app.APP_SCHEMA_VERSION)
+    assert set(calls.values()) == {1}
+
+
 # --- extract_example_sentence (regression: common words with only long quotes) ---
 
 def test_extract_pulls_sentence_with_target_from_long_quote():
@@ -339,11 +416,10 @@ def test_cloze_accepts_both_spellings():
     assert "colours" in forms2 or "colors" in forms2
 
 
-# --- archaic-only fallback (regression: rectangle) -------------------------
+# --- learner-safe archaic filtering ----------------------------------------
 
-def test_ranked_candidates_falls_back_to_archaic_when_only_option(monkeypatch):
-    """A word whose only usable examples are archaic must still return one,
-    instead of being filtered down to zero candidates."""
+def test_ranked_candidates_rejects_archaic_even_when_it_is_the_only_option(monkeypatch):
+    """No example is preferable to unsuitable historical English."""
     import sqlite3 as _sqlite
 
     # Two rows, both archaic — the pre-fix code filtered these out entirely.
@@ -369,8 +445,15 @@ def test_ranked_candidates_falls_back_to_archaic_when_only_option(monkeypatch):
     monkeypatch.setattr(app, "ensure_wiktionary_lookup_index", lambda *a, **k: None)
 
     out = app.ranked_wiktionary_example_candidates("rectangle", "noun")
-    assert len(out) >= 1
-    assert "rectangle" in out[0]["example_sentence"].lower()
+    assert out == []
+
+
+def test_wiktionary_example_filter_catches_untagged_archaic_quotation():
+    sentence = "A man that flattereth his neighbor spreadeth a net for his feet."
+    assert app.contains_archaic_english(sentence)
+    assert not app.usable_wiktionary_example(sentence, "net")
+    assert app.usable_wiktionary_example("She brushed her teeth before bed.", "teeth")
+    assert app.usable_wiktionary_example("The twentieth chapter explains the result.", "twentieth")
 
 
 # --- example_note_from_tags (regression: archaic example warning) ----------

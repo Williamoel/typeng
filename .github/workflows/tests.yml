@@ -24,7 +24,7 @@ jobs:
           pip install pytest
 
       - name: Compile check
-        run: python -m py_compile app.py run_typeng.py
+        run: python -m py_compile app.py run_typeng.py typeng/*.py scripts/*.py
 
       - name: Run tests
         run: python -m pytest -q

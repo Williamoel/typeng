@@ -27,7 +27,7 @@ python run_typeng.py
 
 - Keep changes focused on one feature or bug.
 - Do not commit local app data from `data/`.
-- Do not commit large dictionary resources such as `ecdict.csv`, Wiktionary JSONL, or WordNet zip files.
+- Do not commit large dictionary resources such as `ecdict.csv` or Wiktionary JSONL files.
 - Run at least:
 
 ```bash

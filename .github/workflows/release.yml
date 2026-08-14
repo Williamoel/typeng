@@ -42,12 +42,32 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      - name: Build compact runtime lexicon
+        shell: bash
+        run: |
+          BUILD_HOME="$RUNNER_TEMP/typeng-lexicon-build"
+          mkdir -p "$BUILD_HOME/resources" resources/lexicon
+          curl -fsSL --retry 3 --retry-delay 5 \
+            -o "$BUILD_HOME/resources/ecdict.csv" \
+            "https://raw.githubusercontent.com/skywind3000/ECDICT/master/ecdict.csv"
+          mkdir -p "$BUILD_HOME/resources/efllex"
+          curl -fsSL --retry 3 --retry-delay 5 \
+            -o "$BUILD_HOME/resources/efllex/EFLLex.tsv" \
+            "https://cental.uclouvain.be/cefrlex/static/resources/en/EFLLex.tsv"
+          mkdir -p "$BUILD_HOME/resources/wiktionary"
+          cp resources/wiktionary/exam-pos-index.tsv \
+            "$BUILD_HOME/resources/wiktionary/exam-pos-index.tsv"
+          python scripts/prepare_lexicon_cache.py \
+            --build-home "$BUILD_HOME" \
+            --output resources/lexicon/typeng-lexicon.sqlite3
+
       - name: Build with PyInstaller (Windows)
         if: runner.os == 'Windows'
         run: >
           pyinstaller --noconfirm --clean --name typeng --onedir
           --add-data "templates;templates"
           --add-data "static;static"
+          --add-data "resources;resources"
           --add-data "samples;samples"
           --add-data "README.md;."
           --add-data "README.zh-CN.md;."
@@ -60,6 +80,7 @@ jobs:
           pyinstaller --noconfirm --clean --name typeng --onedir
           --add-data "templates:templates"
           --add-data "static:static"
+          --add-data "resources:resources"
           --add-data "samples:samples"
           --add-data "README.md:."
           --add-data "README.zh-CN.md:."
@@ -70,7 +91,6 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist/typeng/data
-          mkdir -p dist/typeng/resources/wordnet
           mkdir -p dist/typeng/resources/wiktionary
           cp README.md README.zh-CN.md SOURCES.md dist/typeng/
           cp resources/README.md dist/typeng/resources/README.md
@@ -79,22 +99,6 @@ jobs:
           # users see it right after extracting.
           cp "docs/词典安装指南.pdf" dist/typeng/ 2>/dev/null \
             || echo "::warning::词典安装指南.pdf not found; skipping."
-
-      - name: Bundle Open English WordNet for auto examples
-        shell: bash
-        run: |
-          # WordNet (CC-BY 4.0, ~10 MB) powers the auto example-sentence
-          # feature out of the box. Wiktionary is far larger and stays optional
-          # (users add it per SOURCES.md). Don't fail the release if the
-          # download is unavailable — the app degrades gracefully without it.
-          URL="https://en-word.net/static/english-wordnet-2025-json.zip"
-          DEST="dist/typeng/resources/wordnet/english-wordnet-2025-json.zip"
-          if curl -fsSL --retry 3 --retry-delay 5 -o "$DEST" "$URL"; then
-            echo "Bundled WordNet: $(ls -lh "$DEST" | awk '{print $5}')"
-          else
-            echo "::warning::Could not download WordNet; auto examples will be unavailable in this build."
-            rm -f "$DEST"
-          fi
 
       - name: Smoke test the built executable
         shell: bash
@@ -178,5 +182,5 @@ jobs:
             **Linux**: download the `linux-x64` zip, extract it, then run
             `./typeng`.
 
-            Optional dictionary resources can be placed into the extracted
-            `resources/` folder. See `SOURCES.md` and `resources/README.md`.
+            A preprocessed lexicon is included; users do not need to download
+            raw dictionary files. See `SOURCES.md` for data provenance.

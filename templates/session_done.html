@@ -1,42 +1,45 @@
 {% extends "base.html" %}
-
-{% block title %}TypEng - Done{% endblock %}
+{% block title %}TypEng · 练习完成{% endblock %}
+{% block body_class %}workspace-page practice-workspace-page{% endblock %}
 
 {% block content %}
-<section class="panel done-panel">
-  <p class="eyebrow">Session complete</p>
-  {% if mode == "wrong" %}
-    <h1>Wrong-word review finished.</h1>
-    <p>Words that reached {{ wrong_review_target_count }} cumulative correct answers have moved back to learned.</p>
-  {% elif mode == "review" %}
-    <h1>Review session finished.</h1>
-    <p>Correctly reviewed words have been scheduled for their next interval. Words that reached the target will stop appearing in scheduled review.</p>
-  {% elif missed_words %}
-    <h1>Every word was typed correctly once.</h1>
-    <p>These words were missed earlier in the session. Keep the checked ones in wrong words for later review.</p>
-    <form class="missed-form" action="{{ url_for('finalize_practice') }}" method="post">
-      <div class="missed-list">
-        {% for word in missed_words %}
-          <label class="missed-item">
-            <input type="checkbox" name="wrong_ids" value="{{ word.id }}" checked>
-            <span class="word-text">{{ word.word }}</span>
-            <span>{{ word.part_of_speech }}</span>
-            <span>{{ word.meaning }}</span>
-          </label>
-        {% endfor %}
-      </div>
-      <button type="submit">Save choices</button>
-    </form>
-  {% else %}
-    <h1>This study session is done.</h1>
-    <p>All words were typed correctly without misses.</p>
-  {% endif %}
-  {% if not missed_words %}
-    <nav class="done-actions" aria-label="Session destination">
-      <a class="button-link" href="{{ url_for('index') }}">Back to library</a>
-      <a class="secondary-button" href="{{ url_for('learned') }}">Go to learned</a>
-      <a class="secondary-button" href="{{ url_for('wrong') }}">Go to wrong</a>
-    </nav>
-  {% endif %}
+<section class="split-workspace">
+  {% include "_workspace_context.html" %}
+  <main class="task-pane done-pane">
+    <section class="done-panel">
+      <p class="eyebrow">练习完成</p>
+      {% if mode == "wrong" %}
+        <h1>本轮错词巩固完成</h1>
+        <p>达到 {{ wrong_review_target_count }} 次累计正确的单词会重新归入“已掌握”。</p>
+      {% elif mode == "review" %}
+        <h1>本轮复习完成</h1>
+        <p>答对的单词已经安排下一次复习；达到目标次数后将不再进入定时复习。</p>
+      {% elif missed_words %}
+        <h1>这一组单词已经全部答对</h1>
+        <p>以下单词曾在本次练习中答错。勾选需要继续巩固的词，将它们加入错词。</p>
+        <form class="missed-form" action="{{ url_for('finalize_practice') }}" method="post">
+          <div class="missed-list">
+            {% for word in missed_words %}
+              <label class="missed-item">
+                <input type="checkbox" name="wrong_ids" value="{{ word.id }}" checked>
+                <span class="word-text">{{ word.word }}</span><span>{{ word.part_of_speech }}</span><span>{{ word.meaning }}</span>
+              </label>
+            {% endfor %}
+          </div>
+          <button type="submit">保存选择</button>
+        </form>
+      {% else %}
+        <h1>这一组练习完成了</h1>
+        <p>所有单词都一次拼写正确。</p>
+      {% endif %}
+      {% if not missed_words %}
+        <nav class="done-actions" aria-label="完成后前往">
+          <a class="button-link" href="{{ url_for('index') }}">返回待学</a>
+          <a class="secondary-button" href="{{ url_for('learned') }}">前往已掌握</a>
+          <a class="secondary-button" href="{{ url_for('wrong') }}">前往错词</a>
+        </nav>
+      {% endif %}
+    </section>
+  </main>
 </section>
 {% endblock %}

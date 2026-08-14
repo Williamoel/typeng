@@ -116,7 +116,7 @@ TypEng 的标志性功能。把单词——或它正确的词形变体——填�
 
 - 支持基于例句的 cloze 挖空训练。
 - 用户可以为单词手动添加自己的例句。
-- 如果用户没有例句，TypEng 可以从本地 Wiktionary / WordNet 资源中自动匹配例句。
+- 如果用户没有例句，TypEng 可以从本地 Wiktionary 资源中自动匹配例句。
 - `With cloze` 模式：先普通拼写，再对有例句的单词进行 cloze 训练。
 - `Only in cloze` 模式：有例句就做 cloze，没有例句就退化为普通拼写。
 - cloze 练习接受词条原形和句子中的实际形式，并会提示句中正确形式。
@@ -127,7 +127,7 @@ TypEng 的标志性功能。把单词——或它正确的词形变体——填�
 - 支持 TXT 和 CSV 词表导入。
 - 支持手动添加单词和编辑词库。
 - 支持用户自定义中文释义、词性和例句。
-- 基于 ECDICT 标签生成预设词库，例如 CET4、CET6、IELTS、TOEFL、GRE、高考、中考、考研。
+- 基于 ECDICT 标签生成预设词库，先用统一词性与 Wiktionary 核验，再只剔除 EFLLex 能确定低于考试门槛的基础词。
 - 支持词库间排除重复词，方便用户从更高阶词库中去掉已掌握的基础词。
 
 ### 词性和释义
@@ -187,18 +187,19 @@ resources/wiktionary/kaikki.org-dictionary-English.jsonl
 
 TypEng 会尽量过滤古义、废弃义、过时义、罕见义、词形变化项，以及不适合学习的例句。
 
-### Open English WordNet
+### EFLLex
 
-Open English WordNet 作为英文释义和例句的兜底来源。
+EFLLex 为词汇难度研究提供 A1-C1 分级教材中的频率画像。它使用
+CC BY-NC-SA 4.0，和 TypEng 的 MIT 源代码分开授权。TypEng 当前保留完整频率画像和
+明确标为临时口径的等级，不把它宣传为权威的义项级 CEFR 标签。
 
-将 zip 文件放在：
+EFLLex 在预设词库里只承担一项有限职责：剔除确定过于基础的词。中考保留 A1+，
+高考保留 A2+，四级保留 B1+，六级、考研、雅思、托福和 GRE 保留 B2+；
+所有未分级词始终保留。
 
-```text
-resources/wordnet/english-wordnet-2025-json.zip
-```
+来源：<https://cental.uclouvain.be/cefrlex/efllex/download/>
 
-来源：<https://github.com/globalwordnet/english-wordnet>  
-许可：Open English WordNet 项目声明为 CC-BY 4.0。
+许可：CC BY-NC-SA 4.0。
 
 ### 有道词典音频接口
 
@@ -246,15 +247,16 @@ TypEng 为每个平台提供独立、开箱即用的本地压缩包。你不需�
 
 ### Linux
 
-1. 下载 `typeng-v0.1.0-linux-x64.zip`。
+1. 下载 `typeng-v0.2.0-linux-x64.zip`。
 2. 解压文件夹，然后运行其中的 `./typeng`。
 
-### 可选词典资源
+### 内置词典缓存
 
-发行包内含空的 `resources/` 目录，但不包含体积较大的词典文件（ECDICT、Wiktionary、
-WordNet）——它们较大且各自带有许可证。若要启用预设考试词库、英文释义和例句，请按
-[resources/README.md](resources/README.md) 和 [SOURCES.md](SOURCES.md) 的说明，
-把这些文件放进解压后的 `resources/` 目录。
+发行包包含预处理过的紧凑词典数据库和小型 Wiktionary 词性存在索引，可直接使用预设考试词库和 CEFR 频率画像。
+Wiktionary 仍是自动英文释义和例句的可选来源。普通用户不再需要下载或索引 ECDICT、
+EFLLex 原始文件。原始数据只用于维护者
+重建词典缓存或进行词典研究，详见 [resources/README.md](resources/README.md) 和
+[SOURCES.md](SOURCES.md)。
 
 想自己构建安装包的维护者可以参考 [PACKAGING.md](PACKAGING.md)。
 
@@ -338,7 +340,12 @@ abandon,verb,放弃；遗弃,The company decided to abandon the old plan.
 ## 项目结构
 
 ```text
-app.py                 Flask 应用和核心逻辑
+app.py                 Flask 路由与请求适配
+typeng/domain.py       可独立测试的领域规则
+typeng/dictionaries/   ECDICT、Wiktionary 适配器
+typeng/repositories/   SQLite 数据访问层
+typeng/services/       学习与复习用例
+typeng/schema.py       数据库结构和版本迁移
 templates/             Jinja 模板
 static/                CSS 和浏览器 JavaScript
 data/                  本地 SQLite 数据库和生成缓存
@@ -346,10 +353,12 @@ resources/             可选的本地词典资源
 samples/               示例导入文件
 ```
 
+词汇数据采用 `Word → Sense → Example` 模型，并与词库中的学习进度分离。详细设计见 [架构说明](docs/architecture.zh-CN.md)。
+
 ## 开发状态
 
 TypEng 是一个持续维护中的开源项目。已通过 GitHub Actions 自动构建和发布
-Windows、macOS、Linux 多平台桌面包。当前版本 v0.1.2（2026 年 7 月）。
+Windows、macOS、Linux 多平台桌面包。当前版本 v0.2.0（2026 年 8 月）。
 
 正在改进的方向：
 

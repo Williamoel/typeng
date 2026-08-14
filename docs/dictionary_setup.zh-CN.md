@@ -7,12 +7,12 @@
 
 ## 一分钟了解
 
-TypEng 用到三种词典资源，重要程度和是否需要你手动安装如下：
+TypEng 用到三种数据资源，重要程度和是否需要你手动安装如下：
 
 | 资源 | 作用 | 需要你手动装吗？ | 大小 |
 | --- | --- | --- | --- |
-| WordNet | 自动填充例句、英文释义（内置） | 否，发行包已自带 | 约 10 MB |
 | ECDICT | 生成 CET4/6、考研、雅思等预设词库 | 一般不需要 | 约 60 MB |
+| EFLLex | A1-C1 词汇难度画像 | 否，发行包已自带 | 约 7 MB |
 | Wiktionary | 提供最丰富、最自然的例句 | 需要，想要更好例句时自行添加 | 约 3 GB |
 
 结论：**只想正常使用，什么都不用装**。想要最好的例句质量，再按下面的说明添加 Wiktionary。
@@ -28,7 +28,7 @@ TypEng/
 ├─ typeng.exe          ← Windows 上双击运行的程序（Mac 上是 typeng）
 ├─ data/               ← 你的学习数据
 ├─ resources/          ← 词典资源放这里
-│  ├─ wordnet/
+│  ├─ efllex/
 │  └─ wiktionary/
 ├─ samples/
 └─ 词典安装指南.pdf     ← 就是本文件
@@ -87,17 +87,7 @@ Wiktionary 能大幅提升例句的数量和质量。它有约 3 GB，所以没�
 
 ---
 
-## 三、（进阶）替换或添加 WordNet
-
-发行包已内置 WordNet，正常情况下你不用管这一节。如果你想更新到新版本：
-
-1. 下载：**https://en-word.net/static/english-wordnet-2025-json.zip**
-2. 放到：`resources/wordnet/english-wordnet-2025-json.zip`（覆盖原文件）
-3. 重启 TypEng。
-
----
-
-## 四、（进阶）添加 ECDICT 以生成预设词库
+## 三、（进阶）添加 ECDICT 以生成预设词库
 
 如果点击 CET4、考研、雅思等预设词库时提示找不到 ECDICT 数据，可以自行添加：
 
@@ -110,15 +100,13 @@ Wiktionary 能大幅提升例句的数量和质量。它有约 3 GB，所以没�
 
 ---
 
-## 五、常见问题
+## 四、常见问题
 
 **问：点了「自动填充例句」，提示找不到词典源怎么办？**
-答：说明程序没找到 Wiktionary 或 WordNet 文件。发行包本应自带 WordNet；如果你用的是
-自己从源码构建的版本，或删掉了 `resources/wordnet/` 里的文件，请按第三节重新放入
-WordNet；想要更好例句就按第二节安装 Wiktionary。放好后记得**重启 TypEng**。
+答：说明程序没找到 Wiktionary 文件。请按第二节安装 Wiktionary，放好后记得**重启 TypEng**。
 
 **问：文件放对位置了，但还是没生效？**
-答：请确认三点：①文件名完全正确（尤其结尾的 `.jsonl` / `.zip`）；②放的是正确的文件夹；
+答：请确认三点：①文件名完全正确（尤其结尾的 `.jsonl`）；②放的是正确的文件夹；
 ③放好后重新启动了 TypEng。
 
 **问：我需要联网才能用 TypEng 吗？**

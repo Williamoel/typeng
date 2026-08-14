@@ -27,9 +27,10 @@ typeng/
   data/
   resources/
     ecdict.csv
-    wordnet/
-      english-wordnet-2025-json.zip
+    efllex/
+      EFLLex.tsv
     wiktionary/
+      exam-pos-index.tsv
       kaikki.org-dictionary-English.jsonl
   samples/
   词典安装指南.pdf
@@ -104,7 +105,7 @@ The browser should open automatically. If it does not, manually open the local U
 - Start `typeng.exe` on a clean Windows machine.
 - Confirm the browser opens automatically.
 - Confirm preset libraries can be created from packaged ECDICT data.
-- Confirm Wiktionary / WordNet examples and definitions work if those resources are included.
+- Confirm Wiktionary examples and definitions work if that optional resource is included.
 - Confirm new words, learned words, wrong words, and review progress persist after closing and reopening.
 - Confirm `data/` is writable inside the extracted folder.
 - Confirm the app still works without internet access, except for optional external audio behavior if used.
@@ -140,9 +141,10 @@ typeng/
   data/
   resources/
     ecdict.csv
-    wordnet/
-      english-wordnet-2025-json.zip
+    efllex/
+      EFLLex.tsv
     wiktionary/
+      exam-pos-index.tsv
       kaikki.org-dictionary-English.jsonl
   samples/
   词典安装指南.pdf
@@ -216,7 +218,7 @@ pyinstaller ^
 - 在干净的 Windows 环境中启动 `typeng.exe`。
 - 确认浏览器能自动打开。
 - 确认可以从打包的 ECDICT 数据创建预设词库。
-- 如果随包包含 Wiktionary / WordNet，确认英文释义和例句可用。
+- 如果随包包含 Wiktionary，确认英文释义和例句可用。
 - 确认新增单词、已学词、错词和复习进度在关闭重开后仍然保留。
 - 确认解压目录中的 `data/` 可写。
 - 确认离线状态下应用仍然可以使用，除非使用了可选的外部音频来源。

@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% block title %}TypEng · {{ page_title }}{% endblock %}
+{% block body_class %}workspace-page{% endblock %}
+
+{% block content %}
+<section class="split-workspace">
+  {% include "_workspace_context.html" %}
+  <main class="task-pane">
+    {% if selected_word %}
+      <a class="context-back" href="{{ url_for(workspace_endpoint, unit=selected_unit, edit=1 if edit_mode else None) }}" aria-label="返回词表">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12.5 4.5-5 5 5 5M8 9.5h7"/></svg>
+        返回词表
+      </a>
+
+      {% if edit_mode %}
+        <header class="editor-head">
+          <p class="eyebrow">编辑词条</p>
+          <h1>{{ selected_word.word }}</h1>
+        </header>
+        <form id="word-editor-form" class="word-editor" action="{{ url_for('edit_word', word_id=selected_word.id) }}" method="post">
+          <label><span>单词</span><input name="word" type="text" value="{{ selected_word.word }}" required></label>
+          <label><span>词性</span>
+            <select name="part_of_speech" required>
+              {% for value, label in part_of_speech_options %}
+                <option value="{{ value }}" {% if value == selected_word.part_of_speech %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label><span>中文释义</span><input name="meaning" type="text" value="{{ selected_word.meaning }}" required></label>
+          <label class="editor-example"><span>我的例句</span><input name="example_sentence" type="text" value="{{ selected_word.example_sentence or '' }}" placeholder="例句中需要包含目标词"></label>
+        </form>
+        <div class="editor-actions">
+          <button type="submit" form="word-editor-form">保存修改</button>
+          <form action="{{ url_for('delete_word', word_id=selected_word.id) }}" method="post" onsubmit="return confirm('确定删除这个词条？');">
+            <input type="hidden" name="next" value="{{ url_for('libraries', edit=1, unit=selected_unit) }}">
+            <button type="submit" class="danger">删除词条</button>
+          </form>
+        </div>
+      {% else %}
+        <header class="word-detail-head">
+          <p class="eyebrow">单元 {{ selected_unit }}</p>
+          <h1>{{ selected_word.word }}</h1>
+          <p class="word-detail-meta">
+            {{ selected_word.part_of_speech }}
+            {% if selected_word.phonetic %}<span>/{{ selected_word.phonetic }}/</span>{% endif %}
+            <button type="button" class="detail-listen" data-play-word="{{ selected_word.word }}">播放发音</button>
+          </p>
+        </header>
+        <section class="word-detail-section"><h2>中文释义</h2><p class="detail-meaning">{{ selected_word.meaning }}</p></section>
+        {% set matching_definitions = selected_definition|definition_items(selected_word.part_of_speech) %}
+        {% if matching_definitions %}
+          <section class="word-detail-section"><h2>英文释义</h2>
+            <div class="detail-definition definition-list">
+              <span class="definition-pos">{{ selected_word.part_of_speech|display_pos_label }}</span>
+              <ol>{% for definition in matching_definitions %}<li>{{ definition }}</li>{% endfor %}</ol>
+            </div>
+          </section>
+        {% endif %}
+        <section class="word-detail-section examples-section">
+          <div class="detail-section-title"><h2>例句</h2><span>{{ selected_examples|length }} 条</span></div>
+          <div class="detail-examples">
+            {% for example in selected_examples %}
+              <article class="detail-example {% if example.is_user %}user-example{% endif %}">
+                <span class="source-label">{% if example.is_user %}我的例句{% else %}Wiktionary{% endif %}</span>
+                <p>{{ example.sentence }}</p>
+                {% if example.translation %}<small>{{ example.translation }}</small>{% endif %}
+              </article>
+            {% else %}<p class="empty-copy">当前词性暂时没有可用例句。</p>{% endfor %}
+          </div>
+        </section>
+      {% endif %}
+
+    {% elif edit_mode and editor_panel == 'new' %}
+      <a class="context-back" href="{{ url_for('libraries', edit=1, unit=selected_unit) }}">← 返回编辑</a>
+      <div class="task-intro editor-intro"><p class="eyebrow">新建</p><h1>新建词库</h1><p>创建一个空词库，之后可以手动添加或导入词表。</p></div>
+      <form class="workspace-editor-form" action="{{ url_for('add_library') }}" method="post">
+        <input type="hidden" name="workspace" value="1">
+        <label><span>词库名称</span><input name="library_name" type="text" maxlength="80" placeholder="例如：本周生词" autofocus required></label>
+        <button type="submit">创建词库</button>
+      </form>
+
+    {% elif edit_mode and editor_panel == 'add' %}
+      <a class="context-back" href="{{ url_for('libraries', edit=1, unit=selected_unit) }}">← 返回编辑</a>
+      <div class="task-intro editor-intro"><p class="eyebrow">添加</p><h1>添加单词</h1><p>单词和词性必填；中文释义留空时自动匹配。</p></div>
+      <form class="workspace-editor-form" action="{{ url_for('add_word') }}" method="post">
+        <input type="hidden" name="workspace" value="1"><input type="hidden" name="unit" value="{{ selected_unit }}">
+        <label><span>单词</span><input name="word[]" type="text" value="{{ workspace_add_draft.word|default('') }}" required></label>
+        <label><span>词性</span><select name="part_of_speech[]" required><option value="" {% if not workspace_add_draft.part_of_speech|default('') %}selected{% endif %} disabled>选择词性</option>{% for value, label in part_of_speech_options %}<option value="{{ value }}" {% if workspace_add_draft.part_of_speech|default('') == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+        <label><span>中文释义</span><input name="meaning[]" type="text" value="{{ workspace_add_draft.meaning|default('') }}" placeholder="留空自动填写"></label>
+        <label><span>我的例句</span><input name="example_sentence[]" type="text" value="{{ workspace_add_draft.example_sentence|default('') }}" placeholder="可选，需要包含目标词"></label>
+        <button type="submit">添加到词库</button>
+      </form>
+      <p class="editor-footnote">词性由 Wiktionary 验证，中文释义由 ECDICT 按相同词性补全。</p>
+
+    {% elif edit_mode and editor_panel == 'import' %}
+      <a class="context-back" href="{{ url_for('libraries', edit=1, unit=selected_unit) }}">← 返回编辑</a>
+      <div class="task-intro editor-intro"><p class="eyebrow">导入</p><h1>导入词表</h1><p>支持 UTF-8 编码的 TXT 与 CSV 文件。</p></div>
+      <form class="workspace-import-form" action="{{ url_for('import_words') }}" method="post" enctype="multipart/form-data">
+        <input type="hidden" name="workspace" value="1"><input type="hidden" name="unit" value="{{ selected_unit }}">
+        <input name="word_file" type="file" accept=".txt,.csv" required>
+        <button type="submit">选择并导入</button>
+        <a href="{{ url_for('libraries', edit=1, unit=selected_unit, panel='format') }}">查看格式说明</a>
+      </form>
+
+    {% elif edit_mode and editor_panel == 'format' %}
+      <a class="context-back" href="{{ url_for('libraries', edit=1, unit=selected_unit, panel='import') }}">← 返回导入</a>
+      <div class="task-intro editor-intro"><p class="eyebrow">导入</p><h1>格式说明</h1><p>每行一个词条，例句为可选字段。</p></div>
+      <div class="inline-format-guide">
+        <section><h2>TXT</h2><p>单词　词性　中文释义　例句（可选）</p><pre>abandon\tv\t放弃\tThey decided to abandon the plan.</pre></section>
+        <section><h2>CSV</h2><p>可以包含表头，也可以直接填写数据。</p><pre>word,part_of_speech,meaning,example_sentence
+abandon,v,放弃,They decided to abandon the plan.</pre></section>
+      </div>
+
+    {% elif edit_mode and editor_panel == 'dedupe' %}
+      <a class="context-back" href="{{ url_for('libraries', edit=1, unit=selected_unit) }}">← 返回编辑</a>
+      <div class="task-intro editor-intro"><p class="eyebrow">去重</p><h1>排除重复词条</h1><p>从当前词库中移除另一个词库已经包含的内容。</p></div>
+      {% if comparable_libraries %}
+        <form class="workspace-editor-form dedupe-form" action="{{ url_for('exclude_library_words') }}" method="post" onsubmit="return confirm('确定从当前词库移除重合词条？');">
+          <input type="hidden" name="workspace" value="1"><input type="hidden" name="unit" value="{{ selected_unit }}">
+          <label><span>对比词库</span><select name="source_library_id" required>{% for library in comparable_libraries %}<option value="{{ library.id }}">{{ library.name }} · {{ library.word_count }}</option>{% endfor %}</select></label>
+          <fieldset><legend>匹配方式</legend><label><input type="radio" name="match_scope" value="word_part" checked> 单词 + 词性</label><label><input type="radio" name="match_scope" value="word"> 仅单词</label></fieldset>
+          <button type="submit" class="danger">查找并移除</button>
+        </form>
+      {% else %}<p class="empty-copy editor-empty">还没有其他词库可供对比。</p>{% endif %}
+
+    {% elif edit_mode and editor_panel == 'presets' %}
+      <a class="context-back" href="{{ url_for('libraries', edit=1, unit=selected_unit) }}">← 返回编辑</a>
+      <div class="task-intro editor-intro"><p class="eyebrow">预设</p><h1>考试词库</h1><p>创建后会自动切换到新词库。</p></div>
+      <div class="workspace-presets">
+        {% for key, preset in ecdict_presets.items() %}
+          <form action="{{ url_for('create_ecdict_preset_copy') }}" method="post"><input type="hidden" name="workspace" value="1"><input type="hidden" name="preset_key" value="{{ key }}"><button type="submit" class="secondary">{{ preset.name }}</button></form>
+        {% endfor %}
+      </div>
+
+    {% elif workspace_mode == 'home' %}
+      <div class="task-intro"><p class="eyebrow">待学</p><h1>开始练习</h1><p>{{ active_library.name }} · 选择词数和提示方式。</p></div>
+      <form class="session-setup" action="{{ url_for('create_preview') }}" method="post">
+        <label class="count-setting"><span>词数</span><input name="study_count" type="number" min="1" max="200" value="10"></label>
+        {% set include_cloze = true %}{% set show_chinese_default = true %}{% set show_definition_default = true %}{% set auto_audio_default = true %}{% set show_phonetic_default = true %}{% include "_practice_options.html" %}
+        <button type="submit" class="primary-wide">预览单词</button>
+      </form>
+    {% elif workspace_mode == 'learned' %}
+      <div class="task-intro"><p class="eyebrow">复习</p><h1>待复习 {{ due_review_count }}</h1><p>{{ active_library.name }} · 选择本轮词数。</p></div>
+      <form class="session-setup" action="{{ url_for('start_due_review') }}" method="post">
+        <label class="count-setting"><span>词数</span><input name="review_count" type="number" min="1" max="{{ due_review_count if due_review_count else 1 }}" value="{{ 0 if not due_review_count else (due_review_count if due_review_count < 30 else 30) }}" {% if not due_review_count %}disabled{% endif %}></label>
+        {% set include_cloze = true %}{% set show_chinese_default = true %}{% set show_definition_default = true %}{% set auto_audio_default = true %}{% set show_phonetic_default = true %}{% include "_practice_options.html" %}
+        <button type="submit" class="primary-wide" {% if not due_review_count %}disabled{% endif %}>预览单词</button>
+      </form>
+    {% elif workspace_mode == 'wrong' %}
+      <div class="task-intro"><p class="eyebrow">错词</p><h1>待练习 {{ due_wrong_count }}</h1><p>{{ active_library.name }} · 选择本轮词数。</p></div>
+      <form class="session-setup" action="{{ url_for('start_wrong_review') }}" method="post">
+        <label class="count-setting"><span>词数</span><input name="wrong_count" type="number" min="1" max="{{ due_wrong_count if due_wrong_count else 1 }}" value="{{ 0 if not due_wrong_count else (due_wrong_count if due_wrong_count < 30 else 30) }}" {% if not due_wrong_count %}disabled{% endif %}></label>
+        {% set include_cloze = true %}{% set show_chinese_default = true %}{% set show_definition_default = true %}{% set auto_audio_default = true %}{% set show_phonetic_default = true %}{% include "_practice_options.html" %}
+        <button type="submit" class="primary-wide" {% if not due_wrong_count %}disabled{% endif %}>预览单词</button>
+      </form>
+    {% elif edit_mode %}
+      <div class="task-intro"><p class="eyebrow">编辑</p><h1>{{ active_library.name }}</h1><p>左侧选择词条进行编辑，或批量选择后删除。</p></div>
+      <div class="editor-guide"><span>01</span>选择词条编辑内容 <span>02</span>勾选多个词条批量删除</div>
+    {% else %}
+      <div class="task-intro"><p class="eyebrow">词库</p><h1>{{ active_library.name }}</h1><p>选择单词查看释义与例句。</p></div>
+      <div class="library-overview"><div><strong>{{ total_count }}</strong><span>全部词汇</span></div><div><strong>{{ new_count }}</strong><span>新词</span></div><div><strong>{{ learned_count }}</strong><span>已掌握</span></div><div><strong>{{ wrong_count }}</strong><span>错词</span></div></div>
+      <div class="library-actions">
+        <a class="secondary-button" href="{{ url_for('libraries', edit=1, unit=selected_unit) }}">编辑词库</a>
+        <a class="text-button" href="{{ url_for('libraries', edit=1, unit=selected_unit, panel='presets') }}">添加考试词库</a>
+      </div>
+    {% endif %}
+  </main>
+</section>
+{% endblock %}

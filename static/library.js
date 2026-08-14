@@ -1,5 +1,6 @@
 (function () {
   const SCROLL_KEY = "typeng:scroll-position";
+  const CONTEXT_SCROLL_KEY = "typeng:context-scroll-position";
   const OPTION_STORAGE_PREFIX = "typeng:practice-options:";
 
   function currentPageKey() {
@@ -15,6 +16,15 @@
       return;
     }
     try {
+      const contextList = document.querySelector(".context-word-list");
+      if (contextList) {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("word");
+        window.sessionStorage.setItem(
+          CONTEXT_SCROLL_KEY,
+          JSON.stringify({ page: `${url.pathname}${url.search}`, y: contextList.scrollTop, savedAt: Date.now() }),
+        );
+      }
       window.sessionStorage.setItem(
         SCROLL_KEY,
         JSON.stringify({
@@ -35,6 +45,15 @@
     }
     let payload = null;
     try {
+      const contextList = document.querySelector(".context-word-list");
+      const contextPayload = JSON.parse(window.sessionStorage.getItem(CONTEXT_SCROLL_KEY) || "null");
+      if (contextList && contextPayload && Date.now() - Number(contextPayload.savedAt || 0) <= 30000) {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("word");
+        if (contextPayload.page === `${url.pathname}${url.search}`) {
+          window.requestAnimationFrame(() => { contextList.scrollTop = Number(contextPayload.y || 0); });
+        }
+      }
       payload = JSON.parse(window.sessionStorage.getItem(SCROLL_KEY) || "null");
       window.sessionStorage.removeItem(SCROLL_KEY);
     } catch (_error) {
@@ -69,7 +88,7 @@
       if (url.origin !== window.location.origin) {
         return;
       }
-      if (link.closest(".topbar")) {
+      if (link.closest(".app-sidebar, .mobile-header")) {
         return;
       }
       saveScrollPosition();
@@ -146,7 +165,7 @@
     function updateState() {
       const count = selectedCount();
       if (countLabel) {
-        countLabel.textContent = `${count} selected`;
+        countLabel.textContent = `已选择 ${count} 个`;
       }
       if (deleteButton) {
         deleteButton.disabled = count === 0;
@@ -198,7 +217,7 @@
         event.preventDefault();
         return;
       }
-      if (!window.confirm(`Delete ${count} selected words? This cannot be undone.`)) {
+      if (!window.confirm(`确定删除所选的 ${count} 个词条？此操作无法撤销。`)) {
         event.preventDefault();
       }
     });
@@ -214,8 +233,8 @@
 
     form.addEventListener("submit", (event) => {
       const select = form.querySelector("select[name='source_library_id']");
-      const sourceName = select?.selectedOptions?.[0]?.textContent?.trim() || "the selected library";
-      if (!window.confirm(`Remove overlapping words from this library using ${sourceName}?`)) {
+      const sourceName = select?.selectedOptions?.[0]?.textContent?.trim() || "所选词库";
+      if (!window.confirm(`确定根据 ${sourceName} 移除当前词库中的重合词条？`)) {
         event.preventDefault();
       }
     });
@@ -240,21 +259,6 @@
           withCloze.checked = false;
         }
       });
-    });
-  }
-
-  function centerPracticeView() {
-    const wrap = document.querySelector("[data-practice-center]");
-    const card = wrap?.querySelector(".practice-card");
-    if (!wrap || !card) {
-      return;
-    }
-
-    window.requestAnimationFrame(() => {
-      const rect = card.getBoundingClientRect();
-      const targetY = window.scrollY + rect.top + rect.height / 2 - window.innerHeight / 2;
-      const maxY = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-      window.scrollTo({ top: Math.max(0, Math.min(targetY, maxY)), left: 0, behavior: "auto" });
     });
   }
 
@@ -364,11 +368,9 @@
     bindClozeOptions();
     restorePracticeOptions();
     fitClozePrompt();
-    centerPracticeView();
   });
 
   window.addEventListener("resize", () => {
     fitClozePrompt();
-    centerPracticeView();
   });
 })();

@@ -1,60 +1,42 @@
 {% extends "base.html" %}
 
-{% block title %}TypEng - Library{% endblock %}
+{% block title %}TypEng - {{ active_library.name }}{% endblock %}
 
 {% block content %}
 {% if preset_confirm %}
   <section class="panel preset-confirm-panel">
     <div class="section-heading compact-heading">
-      <h2>{{ preset_confirm.name }} already exists</h2>
+      <h2>{{ preset_confirm.name }} 已存在</h2>
     </div>
     <p class="panel-note">
-      The <strong>{{ preset_confirm.name }}</strong> library already has
-      {{ preset_confirm.count }} words, including any edits or deletions you made.
-      What would you like to do?
+      <strong>{{ preset_confirm.name }}</strong> 已有 {{ preset_confirm.count }} 个词，其中包含你的修改和删除记录。请选择处理方式。
     </p>
     <div class="preset-confirm-actions">
       <form action="{{ url_for('create_ecdict_preset') }}" method="post">
         <input type="hidden" name="preset_key" value="{{ preset_confirm.key }}">
         <input type="hidden" name="confirm" value="1">
         <button type="submit" class="tiny danger"
-          onclick="return confirm('Rebuild {{ preset_confirm.name }} from ECDICT? This discards your edits and deletions in this library.');">
-          Rebuild (discard my changes)
+          onclick="return confirm('确定从 ECDICT 重建 {{ preset_confirm.name }}？当前词库中的修改和删除记录将被舍弃。');">
+          重建并舍弃修改
         </button>
       </form>
       <form action="{{ url_for('create_ecdict_preset_copy') }}" method="post">
         <input type="hidden" name="preset_key" value="{{ preset_confirm.key }}">
-        <button type="submit" class="tiny secondary">Create a separate copy</button>
+        <button type="submit" class="tiny secondary">创建独立副本</button>
       </form>
-      <a class="secondary-button tiny-link" href="{{ url_for('index') }}">Cancel</a>
+      <a class="secondary-button tiny-link" href="{{ url_for('index') }}">取消</a>
     </div>
   </section>
 {% endif %}
-{% if not edit_mode %}
-  <section class="panel common-libraries-panel">
-    <div class="section-heading compact-heading">
-      <h2>Common Libraries Available</h2>
-    </div>
-    <div class="preset-actions">
-      {% for key, preset in ecdict_presets.items() %}
-        <form action="{{ url_for('create_ecdict_preset') }}" method="post">
-          <input type="hidden" name="preset_key" value="{{ key }}">
-          <button type="submit" class="tiny secondary">{{ preset.name }}</button>
-        </form>
-      {% endfor %}
-    </div>
-  </section>
-{% endif %}
-
 <section class="panel hero-panel">
   <div class="library-title-block">
-    <p class="eyebrow">Local vocabulary typing</p>
+    <p class="eyebrow">当前词库</p>
     <h1>{{ active_library.name }}</h1>
-    <p class="panel-note">Build a session from the selected library.</p>
+    <p class="panel-note">管理词条、导入数据与清理重复内容。</p>
   </div>
   <div class="library-switcher">
     <form class="library-select-form" action="{{ url_for('select_library') }}" method="post">
-      <label for="library_id">Library</label>
+      <label for="library_id">词库</label>
       <select id="library_id" name="library_id" onchange="this.form.submit()">
         {% for library in libraries %}
           <option value="{{ library.id }}" {% if library.id == active_library.id %}selected{% endif %}>
@@ -67,16 +49,16 @@
           type="submit"
           class="tiny danger"
           form="clear-library-form"
-          onclick="return confirm('Clear every word and learning record? This cannot be undone.');"
-        >Clear library</button>
+          onclick="return confirm('确定清空全部词条和学习记录？此操作无法撤销。');"
+        >清空词库</button>
       {% endif %}
     </form>
     {% if edit_mode %}
       <form id="clear-library-form" action="{{ url_for('clear_words') }}" method="post"></form>
     {% endif %}
     <form class="library-add-form" action="{{ url_for('add_library') }}" method="post">
-      <input name="library_name" type="text" placeholder="New library name" aria-label="New library name" required>
-      <button type="submit">Create</button>
+      <input name="library_name" type="text" placeholder="新词库名称" aria-label="新词库名称" required>
+      <button type="submit">创建</button>
     </form>
   </div>
 </section>
@@ -107,7 +89,7 @@
       <div class="study-session-box study-options-box">
         {% set include_cloze = true %}
         {% set show_chinese_default = true %}
-        {% set show_definition_default = false %}
+        {% set show_definition_default = true %}
         {% set auto_audio_default = true %}
         {% set show_phonetic_default = true %}
         {% include "_practice_options.html" %}
@@ -116,23 +98,40 @@
   </form>
 {% endif %}
 
+{% if not edit_mode %}
+  <section class="panel common-libraries-panel">
+    <div class="section-heading compact-heading">
+      <p class="eyebrow">Presets</p>
+      <h2>Add an exam library</h2>
+    </div>
+    <div class="preset-actions">
+      {% for key, preset in ecdict_presets.items() %}
+        <form action="{{ url_for('create_ecdict_preset') }}" method="post">
+          <input type="hidden" name="preset_key" value="{{ key }}">
+          <button type="submit" class="tiny secondary">{{ preset.name }}</button>
+        </form>
+      {% endfor %}
+    </div>
+  </section>
+{% endif %}
+
 {% if edit_mode %}
   <section class="edit-tools-grid">
     <section class="panel import-panel compact-import-panel">
       <div class="import-copy">
         <div class="compact-panel-title-row">
-          <h2>Import Words</h2>
+          <h2>导入词汇</h2>
         </div>
-        <p>Add a TXT or CSV file into {{ active_library.name }}.</p>
+        <p>将 TXT 或 CSV 文件导入 {{ active_library.name }}。</p>
         <p class="import-guide-line">
-          Before importing, please refer to
-          <a class="secondary-button tiny-link" href="{{ url_for('import_format') }}">Format guide</a>
+          导入前请先查看
+          <a class="secondary-button tiny-link" href="{{ url_for('import_format') }}">格式说明</a>
         </p>
       </div>
       <form class="import-form" action="{{ url_for('import_words') }}" method="post" enctype="multipart/form-data">
         <div class="file-row">
           <input id="word_file" name="word_file" type="file" accept=".txt,.csv" required>
-          <button type="submit">Import</button>
+          <button type="submit">导入</button>
         </div>
       </form>
     </section>
@@ -140,13 +139,13 @@
     {% if comparable_libraries %}
       <section class="panel library-exclude-panel compact-exclude-panel">
         <div class="compact-panel-title-row">
-          <h2>Exclude Overlap</h2>
-          <button type="submit" class="danger tiny" form="exclude-overlap-form">Remove overlap</button>
+          <h2>排除重合词汇</h2>
+          <button type="submit" class="danger tiny" form="exclude-overlap-form">移除重合项</button>
         </div>
-        <p class="compact-panel-note">Remove words from {{ active_library.name }} that already exist in another local library.</p>
+        <p class="compact-panel-note">移除 {{ active_library.name }} 中已经存在于另一个本地词库的词。</p>
         <form id="exclude-overlap-form" class="exclude-form compact-exclude-form" action="{{ url_for('exclude_library_words') }}" method="post" data-exclude-form>
           <label class="exclude-row">
-            <span>Compare with</span>
+            <span>对比词库</span>
             <select name="source_library_id" required>
               {% for library in comparable_libraries %}
                 <option value="{{ library.id }}">{{ library.name }} ({{ library.word_count }})</option>
@@ -154,15 +153,15 @@
             </select>
           </label>
           <div class="exclude-row">
-            <span>Match by</span>
+            <span>匹配方式</span>
             <fieldset class="match-scope">
               <label class="check-label">
                 <input type="radio" name="match_scope" value="word_part" checked>
-                Word + part
+                单词 + 词性
               </label>
               <label class="check-label">
                 <input type="radio" name="match_scope" value="word">
-                Word only
+                仅单词
               </label>
             </fieldset>
           </div>
@@ -171,35 +170,10 @@
     {% endif %}
   </section>
 
-  <section class="panel auto-examples-panel">
-    <div class="section-heading compact-heading">
-      <h2>Auto Examples</h2>
-      <p>Fill examples uses the best candidate. Refresh examples randomly picks from the top 8 suitable candidates in the same word range.</p>
-    </div>
-    <form class="auto-examples-form" action="{{ url_for('fill_auto_examples') }}" method="post">
-      <label for="example_start">Words from</label>
-      <input id="example_start" name="example_start" type="number" min="1" value="1">
-      <label for="example_end">to</label>
-      <input id="example_end" name="example_end" type="number" min="1" value="100">
-      <button type="submit" name="example_mode" value="best">Fill examples</button>
-      <button type="submit" name="example_mode" value="refresh" class="secondary">Refresh examples</button>
-    </form>
-    <div class="maintenance-row">
-      <span>Remove word + part entries unsupported by Wiktionary and WordNet.</span>
-      <form class="cleanup-form" action="{{ url_for('preview_unsupported_entries') }}" method="post">
-        <label for="cleanup_start">Words from</label>
-        <input id="cleanup_start" name="cleanup_start" type="number" min="1" value="{{ request.args.get('cleanup_start', 1) }}">
-        <label for="cleanup_end">to</label>
-        <input id="cleanup_end" name="cleanup_end" type="number" min="1" value="{{ request.args.get('cleanup_end', 100) }}">
-        <button type="submit" class="secondary tiny">Preview cleanup</button>
-      </form>
-    </div>
-  </section>
-
   <section class="panel add-word-panel">
     <div class="section-heading compact-heading">
-      <h2>Add Words</h2>
-      <p>Add one or a few words without preparing a file. If ECDICT is available, a word-only row can be expanded by part of speech.</p>
+      <h2>添加词汇</h2>
+      <p>无需准备文件即可添加少量词汇；填写的例句会被标记为“我的例句”，并在 Cloze 中优先使用。</p>
     </div>
     {% if add_word_messages %}
       <div class="messages local-messages">
@@ -211,21 +185,21 @@
     <form class="add-word-form" action="{{ url_for('add_word') }}" method="post" data-add-word-form>
       <div class="add-word-rows" data-add-word-rows>
         <div class="add-word-row">
-          <input name="word[]" type="text" placeholder="word" aria-label="Word">
-          <select name="part_of_speech[]" aria-label="Part of speech">
-            <option value="" selected disabled hidden>Select part</option>
+          <input name="word[]" type="text" placeholder="单词" aria-label="单词">
+          <select name="part_of_speech[]" aria-label="词性">
+            <option value="" selected disabled hidden>选择词性</option>
             {% for value, label in part_of_speech_options %}
               <option value="{{ value }}">{{ label }}</option>
             {% endfor %}
           </select>
-          <input name="meaning[]" type="text" placeholder="Chinese meaning" aria-label="Chinese meaning">
-          <input name="example_sentence[]" type="text" placeholder="Example sentence" aria-label="Example sentence">
-          <button type="button" class="tiny secondary" data-remove-word-row aria-label="Remove row">Remove</button>
+          <input name="meaning[]" type="text" placeholder="中文释义" aria-label="中文释义">
+          <input name="example_sentence[]" type="text" placeholder="我的例句（可选）" aria-label="我的例句">
+          <button type="button" class="tiny secondary" data-remove-word-row aria-label="移除此行">移除</button>
         </div>
       </div>
       <div class="add-word-actions">
-        <button type="button" class="secondary" data-add-word-row aria-label="Add another row">+ Add row</button>
-        <button type="submit">Save words</button>
+        <button type="button" class="secondary" data-add-word-row aria-label="添加一行">+ 添加一行</button>
+        <button type="submit">保存词条</button>
       </div>
     </form>
   </section>
@@ -237,14 +211,14 @@
       <form class="edit-library-search-grid" action="{{ url_for('index') }}" method="get">
         <input type="hidden" name="edit" value="1">
         <div class="edit-search-primary">
-          <input name="q" type="search" value="{{ pagination.search }}" placeholder="Search words or meanings" aria-label="Search words or meanings">
-          <button type="submit" class="secondary">Search</button>
+          <input name="q" type="search" value="{{ pagination.search }}" placeholder="搜索单词或释义" aria-label="搜索单词或释义">
+          <button type="submit" class="secondary">搜索</button>
           {% if pagination.search %}
-            <a class="secondary-button tiny-link" href="{{ url_for('index', edit=1, sort=pagination.sort) }}">Clear</a>
+            <a class="secondary-button tiny-link" href="{{ url_for('index', edit=1, sort=pagination.sort) }}">清除</a>
           {% endif %}
         </div>
         <label class="sort-control edit-sort-control">
-          Sort
+          排序
           <select name="sort" onchange="this.form.submit()">
             {% for value, label in sort_modes.items() %}
               <option value="{{ value }}" {% if pagination.sort == value %}selected{% endif %}>{{ label }}</option>
@@ -253,12 +227,12 @@
         </label>
       </form>
       <div class="edit-actions-group">
-        <button type="submit" class="secondary save-done-button" form="edit-page-form" name="stay" value="1">Save</button>
-        <a class="secondary-button save-done-button" href="{{ url_for('index') }}">Done</a>
+        <button type="submit" class="secondary save-done-button" form="edit-page-form" name="stay" value="1">保存</button>
+        <a class="secondary-button save-done-button" href="{{ url_for('index') }}">完成</a>
       </div>
       <div class="library-title-group">
-        <h2>Word Library</h2>
-        <p>Same word with different parts of speech is kept as separate knowledge.</p>
+        <h2>词库内容</h2>
+        <p>同一单词的不同词性会作为独立词条保留。</p>
       </div>
     </div>
   {% else %}
@@ -290,12 +264,12 @@
 
   {% if words %}
     <div class="pagination-bar">
-      <span>Showing {{ pagination.start }}-{{ pagination.end }} of {{ pagination.total }}</span>
-      <nav aria-label="Word library pages">
+      <span>显示第 {{ pagination.start }}–{{ pagination.end }} 条，共 {{ pagination.total }} 条</span>
+      <nav aria-label="词库分页">
         {% if pagination.has_prev %}
-          <a class="secondary-button tiny-link" href="{{ url_for('index', edit=1 if edit_mode else None, q=pagination.search or None, sort=pagination.sort, page=pagination.prev_page) }}">Previous</a>
+          <a class="secondary-button tiny-link" href="{{ url_for('index', edit=1 if edit_mode else None, q=pagination.search or None, sort=pagination.sort, page=pagination.prev_page) }}">上一页</a>
         {% else %}
-          <span class="page-disabled">Previous</span>
+          <span class="page-disabled">上一页</span>
         {% endif %}
         <form class="page-jump" action="{{ url_for('index') }}" method="get">
           {% if edit_mode %}
@@ -306,16 +280,16 @@
           {% endif %}
           <input type="hidden" name="sort" value="{{ pagination.sort }}">
           <label>
-            Page
-            <input name="page" type="number" min="1" max="{{ pagination.total_pages }}" value="{{ pagination.page }}" aria-label="Page number">
+            第
+            <input name="page" type="number" min="1" max="{{ pagination.total_pages }}" value="{{ pagination.page }}" aria-label="页码">
             / {{ pagination.total_pages }}
           </label>
-          <button type="submit" class="secondary tiny-link">Go</button>
+          <button type="submit" class="secondary tiny-link">前往</button>
         </form>
         {% if pagination.has_next %}
-          <a class="secondary-button tiny-link" href="{{ url_for('index', edit=1 if edit_mode else None, q=pagination.search or None, sort=pagination.sort, page=pagination.next_page) }}">Next</a>
+          <a class="secondary-button tiny-link" href="{{ url_for('index', edit=1 if edit_mode else None, q=pagination.search or None, sort=pagination.sort, page=pagination.next_page) }}">下一页</a>
         {% else %}
-          <span class="page-disabled">Next</span>
+          <span class="page-disabled">下一页</span>
         {% endif %}
       </nav>
     </div>
@@ -333,15 +307,15 @@
         <div class="bulk-toolbar">
           <label class="check-label">
             <input type="checkbox" data-select-all-words>
-            Select this page
+            选择本页
           </label>
           <span class="keep-first-control">
-            Keep first
-            <input type="number" min="0" step="1" placeholder="0" data-keep-first-count aria-label="Number of words to keep from the top">
-            <button type="button" class="secondary tiny" data-keep-first-apply>Select the rest</button>
+            保留前
+            <input type="number" min="0" step="1" placeholder="0" data-keep-first-count aria-label="从顶部保留的词条数量">
+            <button type="button" class="secondary tiny" data-keep-first-apply>选择其余词条</button>
           </span>
-          <span data-selected-count>0 selected</span>
-          <button type="submit" class="danger tiny" disabled data-bulk-delete-button>Delete selected</button>
+          <span data-selected-count>已选择 0 个</span>
+          <button type="submit" class="danger tiny" disabled data-bulk-delete-button>删除所选</button>
         </div>
       </form>
     {% endif %}
@@ -349,26 +323,26 @@
     <div class="word-table {% if edit_mode %}editing-table{% endif %}">
       <div class="table-row table-head {% if edit_mode %}library-row edit-library-row{% else %}library-view-row{% endif %}">
         {% if edit_mode %}
-          <span>Select</span>
+          <span>选择</span>
         {% endif %}
-        <span>Word</span>
-        <span>Part</span>
-        <span>Meaning</span>
+        <span>单词</span>
+        <span>词性</span>
+        <span>中文释义</span>
         {% if edit_mode %}
-          <span>Example</span>
+          <span>我的例句</span>
         {% endif %}
-        <span>Status</span>
+        <span>状态</span>
       </div>
       {% for word in words %}
         {% if edit_mode %}
           <div class="table-row library-row edit-library-row">
-            <label class="row-select" aria-label="Select {{ word.word }}">
+            <label class="row-select" aria-label="选择 {{ word.word }}">
               <input form="bulk-delete-form" type="checkbox" name="word_ids" value="{{ word.id }}" data-word-select>
             </label>
             <input form="edit-page-form" type="hidden" name="word_ids" value="{{ word.id }}">
             <div class="edit-row-fields">
-              <input form="edit-page-form" name="word_{{ word.id }}" type="text" value="{{ word.word }}" aria-label="Word">
-              <select form="edit-page-form" name="part_of_speech_{{ word.id }}" aria-label="Part of speech">
+              <input form="edit-page-form" name="word_{{ word.id }}" type="text" value="{{ word.word }}" aria-label="单词">
+              <select form="edit-page-form" name="part_of_speech_{{ word.id }}" aria-label="词性">
                 {% set known_part = namespace(found=false) %}
                 {% for value, label in part_of_speech_options %}
                   {% if value == word.part_of_speech %}
@@ -380,17 +354,17 @@
                   <option value="{{ word.part_of_speech }}" selected>{{ word.part_of_speech }}</option>
                 {% endif %}
               </select>
-              <input form="edit-page-form" name="meaning_{{ word.id }}" type="text" value="{{ word.meaning }}" aria-label="Meaning">
-              <input form="edit-page-form" name="example_sentence_{{ word.id }}" type="text" value="{{ word.example_sentence or '' }}" aria-label="Example sentence" placeholder="Example sentence">
+              <input form="edit-page-form" name="meaning_{{ word.id }}" type="text" value="{{ word.meaning }}" aria-label="中文释义">
+              <input form="edit-page-form" name="example_sentence_{{ word.id }}" type="text" value="{{ word.example_sentence or '' }}" aria-label="我的例句" placeholder="我的例句">
             </div>
-            <span><mark class="status {{ word.status }}">{{ word.status }}</mark></span>
+            <span><mark class="status {{ word.status }}">{% if word.status == 'new' %}新词{% elif word.status == 'learned' %}已掌握{% else %}错词{% endif %}</mark></span>
           </div>
         {% else %}
           <div class="table-row library-view-row">
             <span class="word-text">{{ word.word }}</span>
             <span>{{ word.part_of_speech }}</span>
             <span>{{ word.meaning }}</span>
-            <span><mark class="status {{ word.status }}">{{ word.status }}</mark></span>
+            <span><mark class="status {{ word.status }}">{% if word.status == 'new' %}新词{% elif word.status == 'learned' %}已掌握{% else %}错词{% endif %}</mark></span>
           </div>
         {% endif %}
       {% endfor %}
@@ -398,9 +372,9 @@
   {% else %}
     <div class="empty-state">
       {% if pagination.search %}
-        <p>No words match “{{ pagination.search }}”.</p>
+        <p>没有与“{{ pagination.search }}”匹配的词条。</p>
       {% else %}
-        <p>No words yet. Import a list or try <code>samples/basic_words.txt</code>.</p>
+        <p>词库中还没有单词，请先导入词表。</p>
       {% endif %}
     </div>
   {% endif %}
