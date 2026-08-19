@@ -162,6 +162,7 @@ def test_ecdict_preset_merges_transitive_and_intransitive_meanings(monkeypatch):
         "shock,ʃɒk,a. unexpected,\"a. 蓬乱浓密的\",adj,4,1,cet6,100,200,,,\n"
     ).encode()
     monkeypatch.setattr(app, "load_ecdict_data", lambda: raw)
+    monkeypatch.setattr(app, "ecdict_source_signature", lambda: "test-ecdict-v1")
 
     with app.app.app_context():
         app.init_db()
