@@ -9,6 +9,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Iterable
 
+from .constants import BLOCKED_WIKTIONARY_DEFINITION_TAGS
 from .domain import wiktionary_usage_label
 from .parts import compatible_parts, lexical_part
 
@@ -117,7 +118,7 @@ def _wiktionary_definitions(
         )
         for row in rows:
             tags = {tag.strip() for tag in str(row[3] or "").split(",") if tag.strip()}
-            if {"archaic", "obsolete", "dated", "rare", "form-of"} & tags:
+            if BLOCKED_WIKTIONARY_DEFINITION_TAGS & tags:
                 continue
             definition = str(row[2] or "").strip()
             usage_label = wiktionary_usage_label(str(row[3] or ""))
@@ -126,6 +127,23 @@ def _wiktionary_definitions(
             bucket = result.setdefault(key, [])
             if definition and displayed_definition not in bucket:
                 bucket.append(displayed_definition)
+    return result
+
+
+def _wiktionary_headwords(
+    db: sqlite3.Connection, words: set[str]
+) -> dict[str, str]:
+    if not _table_exists(db, "wiktionary_headwords"):
+        return {}
+    result: dict[str, str] = {}
+    for chunk in _chunks(sorted(words)):
+        placeholders = ",".join("?" for _ in chunk)
+        for row in db.execute(
+            f"SELECT word_key, canonical_word FROM wiktionary_headwords "
+            f"WHERE word_key IN ({placeholders})",
+            chunk,
+        ):
+            result[str(row[0])] = str(row[1])
     return result
 
 
@@ -163,6 +181,7 @@ def apply_exam_policy(
     words = {str(entry.get("word") or "").strip().casefold() for entry in entries}
     wiki = _wiktionary_parts(db, words)
     definitions = _wiktionary_definitions(db, words)
+    headwords = _wiktionary_headwords(db, words)
     levels = _efllex_levels(db, words)
     kept: list[dict[str, object]] = []
     stats: Counter[str] = Counter(total=len(entries))
@@ -197,6 +216,7 @@ def apply_exam_policy(
             stats["removed_basic"] += 1
             continue
         normalized = dict(entry)
+        normalized["word"] = headwords.get(word, str(entry.get("word") or "").strip())
         normalized["part_of_speech"] = part
         normalized["definition"] = "\n".join(english_definitions)
         kept.append(normalized)

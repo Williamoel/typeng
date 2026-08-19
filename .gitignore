@@ -25,6 +25,7 @@ data/
 /kaikki.org-dictionary-English.jsonl
 /resources/ecdict.csv
 /resources/efllex/*.tsv
+/resources/lexicon/*.sqlite3
 /resources/wiktionary/*.jsonl
 /resources/wordnet/*.zip
 /resources/tatoeba/

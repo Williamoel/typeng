@@ -7,6 +7,12 @@
       <a class="{% if workspace_mode == 'wrong' %}active{% endif %}" href="{{ url_for('wrong') }}"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><path d="M10 6.5v4.3M10 13.7v.1"/></svg>错词</a>
       <a class="{% if workspace_mode == 'libraries' %}active{% endif %}" href="{{ url_for('libraries') }}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 4.5h5A2.5 2.5 0 0 1 11 7v9H6a2.5 2.5 0 0 1-2.5-2.5Zm13 0h-3A2.5 2.5 0 0 0 11 7v9h3a2.5 2.5 0 0 0 2.5-2.5Z"/></svg>词库</a>
     </nav>
+    {% if g.current_user %}
+      <div class="rail-account">
+        <span title="{{ g.current_user.username }}">{{ g.current_user.username }}</span>
+        <form action="{{ url_for('logout') }}" method="post"><button type="submit">退出</button></form>
+      </div>
+    {% endif %}
     <span class="rail-foot">TYPE · LEARN</span>
   </div>
 
@@ -37,28 +43,43 @@
 
       {% if workspace_mode == 'libraries' %}
         <div class="library-mode-bar">
-          {% if edit_mode %}
-            <a class="{% if editor_panel == 'new' %}active{% endif %}" href="{{ url_for('libraries', edit=1, unit=selected_unit, panel='new') }}">新建</a>
+          {% if search_mode %}
+            <form class="library-search-form" action="{{ url_for('libraries') }}" method="get">
+              <input type="hidden" name="search" value="1">
+              <input name="q" type="search" value="{{ search_query }}" placeholder="搜索当前词库中的英文单词" aria-label="搜索当前词库中的英文单词" pattern="[A-Za-z][A-Za-z '\-]*" autofocus>
+              <button type="submit" aria-label="搜索">↵</button>
+              <a href="{{ url_for('libraries', unit=selected_unit) }}" aria-label="关闭搜索">×</a>
+            </form>
+          {% elif edit_mode %}
             <a class="{% if editor_panel == 'add' %}active{% endif %}" href="{{ url_for('libraries', edit=1, unit=selected_unit, panel='add') }}">添加</a>
             <a class="{% if editor_panel in ['import', 'format'] %}active{% endif %}" href="{{ url_for('libraries', edit=1, unit=selected_unit, panel='import') }}">导入</a>
             <a class="{% if editor_panel == 'dedupe' %}active{% endif %}" href="{{ url_for('libraries', edit=1, unit=selected_unit, panel='dedupe') }}">去重</a>
             <a class="{% if editor_panel == 'presets' %}active{% endif %}" href="{{ url_for('libraries', edit=1, unit=selected_unit, panel='presets') }}">预设</a>
+            <a class="{% if editor_panel == 'export' %}active{% endif %}" href="{{ url_for('libraries', edit=1, unit=selected_unit, panel='export') }}">导出</a>
+            <a class="{% if editor_panel in ['new', 'manage'] %}active{% endif %}" href="{{ url_for('libraries', edit=1, unit=selected_unit, panel='manage') }}">管理</a>
+            <form class="inline-unit-form" action="{{ url_for('add_library_unit') }}" method="post"><button type="submit">单元＋</button></form>
             <a class="finish-edit" href="{{ url_for('libraries', unit=selected_unit) }}">完成</a>
           {% else %}
             <span>浏览模式</span>
             <a href="{{ url_for('libraries', edit=1, unit=selected_unit) }}">编辑</a>
+            <a href="{{ url_for('libraries', search=1) }}">搜索</a>
           {% endif %}
         </div>
       {% endif %}
 
-      <div class="unit-strip" aria-label="单元列表">
-        {% for item in units %}
-          <a class="{% if item.number == selected_unit %}active{% endif %}"
-             href="{{ url_for(workspace_endpoint, unit=item.number, edit=1 if edit_mode else None) }}">{{ item.number }}</a>
-        {% else %}
-          <span>暂无单词</span>
-        {% endfor %}
-      </div>
+      {% if not search_mode %}<div class="unit-strip-shell" data-unit-strip-shell>
+        <button class="unit-scroll-button previous" type="button" data-unit-scroll="previous" aria-label="查看前面的单元" hidden>‹</button>
+        <div class="unit-strip" data-unit-strip tabindex="0" aria-label="单元列表">
+          {% for item in units %}
+            <a class="{% if item.number == selected_unit %}active{% endif %}"
+               title="{% if item.count == item.total_count %}{{ item.total_count }} 个词{% else %}{{ item.count }} / {{ item.total_count }} 个当前状态词{% endif %}"
+               href="{{ url_for(workspace_endpoint, unit=item.number, edit=1 if edit_mode else None) }}">{{ item.number }}</a>
+          {% else %}
+            <span>暂无单词</span>
+          {% endfor %}
+        </div>
+        <button class="unit-scroll-button next" type="button" data-unit-scroll="next" aria-label="查看后面的单元" hidden>›</button>
+      </div>{% endif %}
 
       {% if edit_mode %}
         <form class="workspace-selection-form" action="{{ url_for('bulk_delete_words') }}" method="post" data-bulk-delete-form>
@@ -85,10 +106,12 @@
         <div class="context-word-list">
           {% for item in unit_words %}
             <a class="context-word {% if selected_word and item.id == selected_word.id %}selected{% endif %}"
-               href="{{ url_for(workspace_endpoint, unit=selected_unit, word=item.id) }}">
+               href="{{ url_for(workspace_endpoint, unit=item.unit_number if search_mode else selected_unit, word=item.id, search=1 if search_mode else None, q=search_query if search_mode else None) }}">
               <span>{{ item.word }}</span>
-              <small>{{ item.part_of_speech }} · <span class="zh-meaning-inline">{{ item.meaning }}</span></small>
+              <small>{{ item.part_of_speech }} · <span class="zh-meaning-inline">{{ item.meaning }}</span>{% if search_mode %} · 单元 {{ item.unit_number }}{% endif %}</small>
             </a>
+          {% else %}
+            {% if search_mode and search_query %}<p class="context-search-empty">没有匹配的英文单词</p>{% endif %}
           {% endfor %}
         </div>
       {% endif %}

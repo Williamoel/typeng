@@ -1,397 +1,127 @@
 <div align="center">
 
-# ⌨️ TypEng
+# TypEng
 
-**把单词打出来，而不只是认出来。**
+**把单词打出来，在语境里真正学会它。**
 
-一款本地优先的英语单词记忆工具，通过键盘拼写和语境填空（cloze）建立真正的拼写肌肉记忆。
+一款极简、开源的英语词汇学习工具，核心是键盘主动拼写、按词性对齐的释义，以及语境填空训练。
 
-<a href="https://github.com/Williamoel/typeng/releases/latest"><img src="https://img.shields.io/github/v/release/Williamoel/typeng?color=4c9a2a&label=release" alt="最新版本"></a>
-<img src="https://img.shields.io/badge/平台-Windows%20%7C%20macOS%20%7C%20Linux-0a7bbb" alt="平台">
-<img src="https://img.shields.io/badge/python-3.12-3776ab" alt="Python 3.12">
-<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License"></a>
-<img src="https://img.shields.io/badge/数据-100%25%20本地-e67e22" alt="本地优先">
+[English](README.md) · [下载最新版本](https://github.com/Williamoel/typeng/releases/latest) · [数据来源](SOURCES.md)
 
-[English](README.md) · **中文**
-
-### [⬇️ 下载最新版本](https://github.com/Williamoel/typeng/releases/latest)
-
-Windows · macOS · Linux —— 下载、解压、双击即可。无需安装 Python，无需配置。
-
-<br>
-
-![打字背词](./images/typing_word.png)
+![TypEng 网站工作区](docs/design/web-cloze-feedback-concept.png)
 
 </div>
 
-## 为什么做 TypEng
+## v0.3 的变化
 
-大多数背单词工具让你去“认出”一个单词或“选出”一个含义。这能帮你熟悉词义，但并不能保证你真的拼得出这个词，也很少把它放回真实的句子里。
+TypEng 现在既可以作为本地应用使用，也可以部署成公开网站。网站模式允许任何人注册：用户选择一个不重复的中文或英文用户名，以及不少于 6 位的密码。每个账号的词库、单元、学习进度、复习队列、错词和 Cloze 反馈都彼此隔离。
 
-TypEng 让你**把答案打出来**，并且**明白这个词为什么能放进这个句子**。它把单词学习拆成几个具体动作：看中文或释义回忆拼写、听发音后输入单词、在真实的填空句子里补全单词、再通过错词本和间隔复习不断巩固。
+界面也已经重构为黑色纵向导航与两个留有间距的白色工作区。浏览词库、编辑、预览、学习、复习和查看词条都在同一套视觉结构中完成。
 
-一切都在你自己的电脑上运行——没有账号、没有云、没有遥测。你可以直接用预设考试词库，也可以导入课堂、生词本、阅读材料里的单词，并写下你真正想记住的例句。
+## 核心学习方式
 
-## 核心特性
+- 不做选择题，而是亲手输入答案，训练真正的拼写回忆。
+- 同一个单词按词性拆成独立词条，对齐中文释义、英文释义、音标、例句和用法标签。
+- 支持普通拼写、仅 Cloze，以及“拼写后追加 Cloze”三种训练路径。
+- Cloze 优先使用用户自己写的例句，否则从 Wiktionary 候选中筛选。
+- 用户可以反馈例句太难、太简单、不合适或存在错误。
+- 每个词库独立维护已掌握、待复习和错词状态。
+- 自定义 Unit 的边界保持稳定，但一次学习可以跨 Unit 自动取足设定词数。
 
-<table>
-<tr>
-<td width="50%">
+## 词库与数据处理
 
-### ⌨️ 打字，而非猜测
-从释义、定义或发音回忆拼写，再亲手打出来。靠的是肌肉记忆，不是选择题。
+当前版本支持：
 
-</td>
-<td width="50%">
+- 中考、高考、四级、六级、考研、雅思、托福和 GRE 预设词库；
+- 使用 EFLLex 剔除确定过于基础的词汇；
+- 使用 Wiktionary 核验词性，并提供英文释义、例句、用法标签和固定搭配；
+- 使用 ECDICT 提供中文释义、音标、词频和考试标签；
+- 更健壮的 TXT/CSV 导入、按课程划分 Unit、导出、英文搜索、批量编辑和跨词库去重。
 
-### 📝 语境填空（cloze）
-TypEng 的标志性功能。把单词——或它正确的词形变体——填进真实例句，同时训练拼写、搭配和词形。
+体积很大的原始词典只在构建阶段使用。桌面发行包和网站使用紧凑 SQLite 词典缓存。各数据源和许可证边界见 [SOURCES.md](SOURCES.md)。
 
-</td>
-</tr>
-<tr>
-<td width="50%">
+## 本地运行
 
-### 📚 你自己的词库
-导入 TXT/CSV，按词性拆分词条，并从高阶词库中排除你已掌握的词，省去无谓的重复。
-
-</td>
-<td width="50%">
-
-### 🔁 错词本 + 间隔复习
-错词本搭配受艾宾浩斯遗忘曲线启发的间隔复习，复习目标次数按词库自定义。
-
-</td>
-</tr>
-<tr>
-<td width="50%">
-
-### 🔊 可选发音
-通过有道提供英/美音，并有浏览器语音合成兜底。关掉即可完全离线。
-
-</td>
-<td width="50%">
-
-### 🔒 本地优先
-词库、进度和数据库永远不离开你的电脑。无账号、无同步、无追踪。
-（发音为可选在线服务，关闭后即可完全离线使用。）
-
-</td>
-</tr>
-</table>
-
-## TypEng 如何运作
-
-**信息丰富的练习卡片。** 常规练习可以同时呈现中文意思、词性、音标、英美发音和英文释义。同一个单词按词性拆成独立词条，让你分别学习每种用法；对应词性的英文释义帮助高阶学习者跳出中文含义。拼错时立即显示正确拼写；每组结束后，TypEng 会重练你写错的词，直到每个都正确拼写一次。
-
-![模式选择](./images/mode_choice.png)
-
-**节奏由你掌控。** 选择接下来学习的词条数量，自由组合中文提示、英文释义、音标、自动发音和 cloze 练习。`With cloze` 在常规拼写后追加一轮语境练习；`Only in cloze` 以语境为主，没有例句的词条自动退回常规拼写。
-
-![语境训练](./images/filling_cloze.png)
-
-**cloze 是关键差异。** 你不是对着孤立释义回忆单词，而是在真实句子里补全目标词或它的变体——同时训练拼写、搭配和词形，更接近真正使用单词时的状态。
-
-![导入和去重](./images/import_and_exclude.png)
-
-**按你的方式建词库。** 按格式指南导入 TXT/CSV，并在词库之间排除重复词——比如从 TOEFL 词库里删掉你已经学过的四六级词。编辑界面也支持批量删除，方便大规模整理。
-
-![自动填充](./images/auto_filling.png)
-
-**把杂活交给 TypEng。** 只给单词，它就能按词性自动匹配例句。`Fill examples` 选评分最高的句子；`Refresh examples` 从候选中换一个；`Preview cleanup` 标出仍缺可靠例句的词条。缺失的中文释义会从本地词典按词性补全，只输入单词也能按词性拆成多个词条。
-
-![复习设置](./images/review_choice.png)
-
-**会适应你的复习。** 每个词库有独立的学习、错词和间隔复习状态。TypEng 根据你学习每个词的时间和艾宾浩斯遗忘曲线给出复习建议，而复习多少词、成功多少轮后停止提醒，仍由你决定。
-
-## TypEng 背后的故事
-
-我从小学开始就一直用一款叫 Dr.eye 的软件，靠键盘打字记忆单词。它确实有效，但只能提供单词和中文释义——没有语境。后来我也试过带语境拼写的软件，但在手机上拼写体验很差，词库也很小。我想要的是一款专注电脑端打字的工具，让键盘打字形成的肌肉记忆帮我更深刻地记住并**理解**单词。
-
-所以 TypEng 是我一直想要的那个工具：可以直接用预设考试词库，也可以导入课堂、生词本、阅读材料里的单词；你可以手写真正想记住的例句，也可以让 TypEng 先自动补全一个参考语境再继续编辑。它希望成为你自己的单词训练台，而不是又一份固定词表。
-
-## 功能细节
-
-### 语境学习和 cloze 训练
-
-- 支持基于例句的 cloze 挖空训练。
-- 用户可以为单词手动添加自己的例句。
-- 如果用户没有例句，TypEng 可以从本地 Wiktionary 资源中自动匹配例句。
-- `With cloze` 模式：先普通拼写，再对有例句的单词进行 cloze 训练。
-- `Only in cloze` 模式：有例句就做 cloze，没有例句就退化为普通拼写。
-- cloze 练习接受词条原形和句子中的实际形式，并会提示句中正确形式。
-
-### 词库定制
-
-- 支持多个本地词库。
-- 支持 TXT 和 CSV 词表导入。
-- 支持手动添加单词和编辑词库。
-- 支持用户自定义中文释义、词性和例句。
-- 基于 ECDICT 标签生成预设词库，先用统一词性与 Wiktionary 核验，再只剔除 EFLLex 能确定低于考试门槛的基础词。
-- 支持词库间排除重复词，方便用户从更高阶词库中去掉已掌握的基础词。
-
-### 词性和释义
-
-- 同一个英文单词可以按不同词性拆成多个词条。
-- 不同词性会保留不同的中文释义、英文释义和例句。
-- 适合训练熟词偏义，例如一个常见单词在名词、动词、形容词或副词中可能有完全不同的用法。
-- 可选显示英文释义，英文释义会尽量按对应词性补全。
-- 可选显示音标，避免纯听力训练时受到音标干扰。
-
-### 练习和复习
-
-- 按顺序进行学习，而不是随机打乱。
-- 支持中文提示、纯音频、中文加音频等模式。
-- 通过有道词典音频接口播放单词发音，支持 US/UK 选择，并在音频不可用时尝试使用浏览器语音合成兜底。
-- 错词本支持每日复习，答对到用户设置的次数后移回已学区。
-- 已学单词支持参考艾宾浩斯记忆曲线的间隔复习，每个词库可以独立设置复习目标次数。
-- 每次复习前可以选择本次要复习的单词数量。
-- 浏览器会记住练习选项，减少重复设置。
-
-## 词典和例句来源
-
-TypEng 只使用用户自己的词表也可以运行，但如果提供本地词典资源，会更完整。
-
-### ECDICT
-
-ECDICT 主要用于：
-
-- 生成考试或分类预设词库
-- 中文释义
-- 音标
-- 词频
-- `cet4`、`cet6`、`toefl`、`ielts`、`gre`、`gk`、`zk` 等标签
-
-打包或本地使用时，将 CSV 放在：
-
-```text
-resources/ecdict.csv
-```
-
-来源：<https://github.com/skywind3000/ECDICT>  
-许可：ECDICT 项目声明为 MIT License。
-
-### Wiktionary / Kaikki
-
-Kaikki 的英文 Wiktionary JSONL 导出目前作为主要来源，用于：
-
-- 按词性匹配英文释义
-- 按词性匹配英文例句
-- cloze 例句
-
-文件可以放在项目根目录，或者：
-
-```text
-resources/wiktionary/kaikki.org-dictionary-English.jsonl
-```
-
-TypEng 会尽量过滤古义、废弃义、过时义、罕见义、词形变化项，以及不适合学习的例句。
-
-### EFLLex
-
-EFLLex 为词汇难度研究提供 A1-C1 分级教材中的频率画像。它使用
-CC BY-NC-SA 4.0，和 TypEng 的 MIT 源代码分开授权。TypEng 当前保留完整频率画像和
-明确标为临时口径的等级，不把它宣传为权威的义项级 CEFR 标签。
-
-EFLLex 在预设词库里只承担一项有限职责：剔除确定过于基础的词。中考保留 A1+，
-高考保留 A2+，四级保留 B1+，六级、考研、雅思、托福和 GRE 保留 B2+；
-所有未分级词始终保留。
-
-来源：<https://cental.uclouvain.be/cefrlex/efllex/download/>
-
-许可：CC BY-NC-SA 4.0。
-
-### 有道词典音频接口
-
-TypEng 当前通过有道词典的 `dictvoice` 音频接口提供英音和美音发音，并在接口不可用时尝试使用浏览器自带的语音合成作为兜底。开启发音功能时，浏览器会向有道的音频地址请求当前练习单词；如果完全离线，自动发音可能不可用。
-
-## 隐私说明
-
-TypEng 坚持本地优先：你的词库、学习进度和 SQLite 数据库都不会离开你的电脑，
-没有账号系统、埋点统计或云同步。
-
-唯一的例外是可选的发音功能。开启音频播放时，浏览器会向有道词典公开的 `dictvoice`
-音频接口请求当前练习单词，因此这一个单词会被发送到有道的服务器。如果你希望完全离线，
-可以在练习选项中关闭自动发音，此时 TypEng 会退回到浏览器自带的语音合成，不产生网络请求。
-
-## 下载与运行
-
-TypEng 为每个平台提供独立、开箱即用的本地压缩包。你不需要安装 Python、进入 WSL、
-创建虚拟环境，也不需要输入任何 Flask 命令。下载、解压、运行即可——程序会自动启动本地
-服务并在浏览器中打开。所有数据（SQLite 数据库、词库资源、学习记录）都保存在你自己的
-电脑上。
-
-在发行页获取最新的安装包：
-
-**<https://github.com/Williamoel/typeng/releases/latest>**
-
-### Windows
-
-1. 下载 `typeng-v0.1.0-windows-x64.zip`。
-2. 解压整个文件夹。
-3. 双击 `typeng.exe`。
-4. 首次运行时，Windows SmartScreen 可能会提示这是无法识别的应用（TypEng 目前还没有
-   代码签名）。点击 **更多信息 → 仍要运行** 即可。
-
-### macOS
-
-1. 下载 `typeng-v0.1.0-macos-arm64.zip`（Apple Silicon：M1/M2/M3）或
-   `typeng-v0.1.0-macos-x64.zip`（Intel）。
-2. 解压文件夹，然后运行其中的 `TypEng`。
-3. 由于应用未签名，macOS Gatekeeper 首次启动时可能会拦截。右键点击 `TypEng` 选择
-   **打开**，或在终端里执行一次：
-
-   ```bash
-   xattr -dr com.apple.quarantine <解压后的文件夹>
-   ```
-
-### Linux
-
-1. 下载 `typeng-v0.2.2-linux-x64.zip`。
-2. 解压文件夹，然后运行其中的 `./typeng`。
-
-### 内置词典缓存
-
-发行包包含预处理过的紧凑词典数据库和小型 Wiktionary 词性存在索引，可直接使用预设考试词库和 CEFR 频率画像。
-Wiktionary 仍是自动英文释义和例句的可选来源。普通用户不再需要下载或索引 ECDICT、
-EFLLex 原始文件。原始数据只用于维护者
-重建词典缓存或进行词典研究，详见 [resources/README.md](resources/README.md) 和
-[SOURCES.md](SOURCES.md)。
-
-想自己构建安装包的维护者可以参考 [PACKAGING.md](PACKAGING.md)。
-
-## 从源码运行（面向开发者）
+推荐 Python 3.12：
 
 ```bash
-python3 -m venv .venv
+git clone https://github.com/Williamoel/typeng.git
+cd typeng
+python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 python app.py
 ```
 
-然后打开 `http://127.0.0.1:5000`。这是一个本地 Flask 应用，打开 `127.0.0.1`
-不需要 VPN，也不需要互联网连接。
+浏览器打开 `http://127.0.0.1:5000`。本地模式不显示登录页面，只接受当前电脑访问，数据保存在系统对应的 TypEng 数据目录中。
 
-测试桌面版启动器：`python run_typeng.py`
+Windows、macOS 和 Linux 的免配置桌面包会附在每个 [GitHub Release](https://github.com/Williamoel/typeng/releases/latest) 中。
 
-## 导入格式
+## 在本机体验账号网站模式
 
-TypEng 支持 TXT 和 CSV 导入。
+```bash
+pip install -r requirements-web.txt
+export TYPENG_WEB_MODE=1
+export TYPENG_SECRET_KEY='替换成一段足够长且固定的随机字符串'
+export TYPENG_ALLOWED_HOSTS='127.0.0.1'
+export TYPENG_COOKIE_SECURE=0
+gunicorn --bind 127.0.0.1:8000 --workers 1 --threads 8 wsgi:app
+```
 
-在编辑界面的 `Add Words` 中，用户也可以只输入单词，或输入单词加词性。只要本地有 ECDICT 资源，TypEng 会尝试自动补全对应词性的中文释义；如果只输入单词，TypEng 会按 ECDICT 中的词性拆成多个词条。`Add Words` 不会覆盖已有的相同单词加相同词性词条，如需修改已有词条，请在词库编辑列表中直接编辑。文件导入仍建议使用下面的标准格式。
+打开 `http://127.0.0.1:8000/register`。正式 HTTPS 部署时必须保持 `TYPENG_COOKIE_SECURE=1`。
 
-必需字段：
+### 账号规则
 
-- `word`
-- `part_of_speech`
-- `meaning`
+- 用户名为 1–32 个中文、英文字母、数字或下划线；
+- Unicode 规范化后必须唯一，英文用户名不区分大小写；
+- 密码为 6–256 位，只保存 Werkzeug 生成的密码哈希；
+- 每个浏览器设备每天最多提交 100 次注册请求；设备 Cookie 尚未建立时，以来源 IP 兜底；
+- 当前不要求邮箱验证，也暂时没有找回密码功能。
 
-可选字段：
+## 部署到云端
 
-- `example_sentence`
+仓库已经提供 `render.yaml`、`Dockerfile` 和 Gunicorn 入口。最短流程是：
 
-TXT 文件可以使用制表符、逗号或竖线分隔：
+1. 将当前版本推送到 GitHub。
+2. 登录 Render，选择 **New → Blueprint**，连接 TypEng 仓库。
+3. 使用配置中带 1 GB 持久磁盘的付费 Web Service。
+4. 把 `TYPENG_ALLOWED_HOSTS` 设置成 Render 分配的域名，不要填写 `https://`。
+5. 部署完成后打开 Render 提供的 `onrender.com` 地址，进入 `/register` 注册。
+
+账号和学习数据位于持久磁盘 `/var/lib/typeng`。不要用无持久磁盘的免费实例承载正式数据，否则重新部署或重启后数据可能消失。容器首次启动会下载 Release 中的紧凑词典缓存。
+
+完整步骤、域名和备份说明见 [网站部署指南](docs/web-deployment.zh-CN.md)。
+
+## 技术结构
 
 ```text
-abandon	verb	放弃；遗弃
-ability	noun	能力
-close	adjective	近的；亲密的
-close	verb	关闭
-abandon	verb	放弃；遗弃	The company decided to abandon the old plan.
+Flask 路由与 Session
+        │
+        ├── 账号认证与设备注册限流
+        ├── 用户级词库所有权
+        ├── 学习 / 复习服务
+        └── Repository 数据访问层
+                │
+                ├── 可写 SQLite 学习数据库
+                └── 紧凑型只读词典缓存
 ```
 
-CSV 文件可以使用表头：
+网站当前固定为一个 Gunicorn Worker 加多个线程，适合单实例 SQLite。以后如果需要多实例扩容，应迁移到 PostgreSQL 等共享数据库。
 
-```csv
-word,part_of_speech,meaning,example_sentence
-abandon,verb,放弃；遗弃,The company decided to abandon the old plan.
+## 测试
+
+```bash
+PYTHONPATH=. pytest -q
 ```
 
-也可以不写表头，直接使用相同列顺序。
+测试覆盖导入解析、词典清洗、稳定 Unit、词库隔离、学习和复习流程、注册登录、用户数据边界、每日注册限流，以及紧凑词典构建。
 
-同一个英文单词可以因为词性不同而出现多次。同一个单词加同一个词性会被视为同一个词条。
+## 项目定位
 
-## 练习规则
+TypEng 是学生主导的作品集和研究型项目，而不是商业化英语平台。现阶段重点是词典数据质量、可解释的例句选择、真实学习反馈，以及清晰可维护的网站架构。
 
-- 按 Enter 或按钮提交答案。
-- 忽略首尾空格。
-- 大小写严格。
-- 普通单词练习要求输入词条中保存的标准单词。
-- cloze 练习同时接受词条原形和句子中的实际形式。如果用户输入原形但句子中使用了变化形式，TypEng 会判定正确，并在进入下一题前提示句中正确形式。
-- 错误答案会用红色显示正确答案。
-- 普通学习中，打错过的词会重复出现，直到本组所有词都被正确打出一次。最后用户可以选择哪些打错过的词进入错词本。
-
-## 复习机制
-
-每个词库有独立的学习状态。
-
-单词状态：
-
-- `new`：尚未学习
-- `learned`：普通学习完成，或从错词复习中移出
-- `wrong`：当前在错词本中
-
-已学单词可以进入参考艾宾浩斯记忆曲线思想的间隔复习。当前实现使用固定间隔表安排复习日期：第 1、2、4、7、15、30、60、120、180、365 天。每次已学词复习答对后，单词进入下一个间隔；如果答错，会在本次复习会话中继续出现，直到答对为止。达到该词库设置的目标次数后，这个词就不再继续安排已学词复习。
-
-每个词库可以独立设置已学词复习目标次数，最低为三次成功复习，最高为十次成功复习。复习开始前，TypEng 会提示当前有多少词需要复习，用户也可以按自己的时间选择本次先复习多少个。
-
-错词会按每日复习处理。错词复习答对一次但尚未达到目标次数时，会保留在错词本中，并安排到第二天继续复习；答错会把错词累计正确次数重置为 0，也安排到第二天再复习。错词达到用户设置的累计正确次数后，会移回已学单词，并从第二天开始进入已学词的间隔复习。
-
-## 项目结构
-
-```text
-app.py                 Flask 路由与请求适配
-typeng/domain.py       可独立测试的领域规则
-typeng/dictionaries/   ECDICT、Wiktionary 适配器
-typeng/repositories/   SQLite 数据访问层
-typeng/services/       学习与复习用例
-typeng/schema.py       数据库结构和版本迁移
-templates/             Jinja 模板
-static/                CSS 和浏览器 JavaScript
-data/                  本地 SQLite 数据库和生成缓存
-resources/             可选的本地词典资源
-samples/               示例导入文件
-```
-
-词汇数据采用 `Word → Sense → Example` 模型，并与词库中的学习进度分离。详细设计见 [架构说明](docs/architecture.zh-CN.md)。
-
-## 开发状态
-
-TypEng 是一个持续维护中的开源项目。已通过 GitHub Actions 自动构建和发布
-Windows、macOS、Linux 多平台桌面包。当前版本 v0.2.2（2026 年 8 月）。
-
-正在改进的方向：
-
-- 学习进度导入导出
-- 更好的例句质量评分（引入 ML 排序）
-- 更准确的词典义项匹配
-- 扩大集成测试覆盖
-- 可选的界面语言切换
-
-## 路线图
-
-近期：
-
-- 继续优化自动例句选择
-- 基于 ML 的例句质量排序
-- 改进 Wiktionary 英文释义匹配
-- 增加词库和学习进度的导入导出
-
-长期：
-
-- 更丰富的数据统计
-- 更好的音频来源管理
-- 可选在线词典查询
-- 更多许可证清晰的内置词库
-
-## 感谢
-
-本项目最大的灵感来源是 [Dr.eye](https://www.dreye.com/)，我使用它的时间快十五年了，如果没有它，我不会知道可以通过肌肉记忆来记住单词，很大程度上我的词汇量积累都是因为它。也同样感谢[词达人](https://www.unipus.cn/)提供的语境填空模式的灵感。
-
-[Qwerty Learner](https://qwerty.kaiyi.cool/) 是一款为键盘工作者设计的单词记忆与英语肌肉记忆锻炼软件，我是在有了大致想法之后才了解到这款软件，但遗憾于它没有语境的设置。在开发过程中，感谢 Qwerty Learner 提供单词音频问题解决方案的灵感。它的开源仓库见 [RealKai42/qwerty-learner](https://github.com/RealKai42/qwerty-learner)。
+欢迎贡献。提交 Pull Request 前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 许可证
 
-TypEng 使用 MIT License 开源，见 [LICENSE](LICENSE)。
-
-词典和词库资源保留各自的许可证。见 [SOURCES.md](SOURCES.md) 和 [resources/README.md](resources/README.md)。
+TypEng 程序代码使用 [MIT License](LICENSE)。词典数据保留各自许可证；重新分发前请阅读 [SOURCES.md](SOURCES.md)。

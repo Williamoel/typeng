@@ -6,6 +6,7 @@ import sqlite3
 from collections.abc import Callable
 
 from .examples import replace_user_example
+from .units import assign_unassigned
 
 
 def count(db: sqlite3.Connection, library_id: int, status: str | None = None) -> int:
@@ -24,6 +25,55 @@ def fetch_all(db: sqlite3.Connection, library_id: int, status: str | None = None
         sql += " AND status = ?"
         params.append(status)
     return db.execute(sql + " ORDER BY id ASC", params).fetchall()
+
+
+def fetch_for_export(
+    db: sqlite3.Connection,
+    library_id: int,
+    unit_number: int | None = None,
+) -> list[sqlite3.Row]:
+    """Return one library in stable unit order with only authored examples.
+
+    Dictionary examples are intentionally not exported as user examples: if a
+    CSV is imported again, TypEng must not accidentally promote a Wiktionary
+    quotation to user-authored priority.
+    """
+    sql = """
+        SELECT words.*,
+               COALESCE(
+                   (
+                       SELECT sentence FROM word_examples
+                       WHERE word_examples.word_id = words.id
+                         AND word_examples.source = 'user'
+                       ORDER BY word_examples.rank, word_examples.id
+                       LIMIT 1
+                   ),
+                   CASE WHEN words.example_source = 'user'
+                        THEN words.example_sentence END
+               ) AS exported_example_sentence,
+               COALESCE(
+                   (
+                       SELECT translation FROM word_examples
+                       WHERE word_examples.word_id = words.id
+                         AND word_examples.source = 'user'
+                       ORDER BY word_examples.rank, word_examples.id
+                       LIMIT 1
+                   ),
+                   CASE WHEN words.example_source = 'user'
+                        THEN words.example_translation END
+               ) AS exported_example_translation
+        FROM words
+        WHERE words.library_id = ?
+    """
+    params: list[object] = [library_id]
+    if unit_number is not None:
+        sql += " AND words.unit_number = ?"
+        params.append(max(1, unit_number))
+    sql += """
+        ORDER BY CASE WHEN words.unit_number IS NULL THEN 1 ELSE 0 END,
+                 words.unit_number, words.unit_position, words.id
+    """
+    return db.execute(sql, params).fetchall()
 
 
 def fetch_one(db: sqlite3.Connection, library_id: int, word_id: int) -> sqlite3.Row | None:
@@ -130,5 +180,6 @@ def import_entries(
                 db, word_id, str(entry["example_sentence"]),
                 str(entry.get("example_translation") or "") or None,
             )
+    assign_unassigned(db, library_id)
     db.commit()
     return inserted, updated, skipped

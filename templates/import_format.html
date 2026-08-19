@@ -7,26 +7,42 @@
   <div class="section-heading">
     <p class="eyebrow">导入词汇</p>
     <h1>导入格式</h1>
-    <p>同样的说明也可以在项目文档中查看。</p>
+    <p>文件需使用 UTF-8 编码。TXT 支持标准分列和常见词典块，CSV 适合结构化整理。</p>
   </div>
 
   <div class="docs-grid">
     <article>
-      <h2>TXT</h2>
-      <p>前三列依次为单词、词性、中文释义；第四列可以填写自己的例句，系统会在 Cloze 中优先使用。</p>
+      <h2>TXT · 标准分列</h2>
+      <p>每行一个词条，以 Tab、竖线或英文逗号分隔。前三列依次为单词、词性、中文释义；第四列可填写自己的例句。</p>
       <pre><code>abandon	verb	放弃；遗弃
-ability	noun	能力
-close	adjective	近的；亲密的
-close	verb	关闭
+ability|noun|能力
+close,adjective,近的；亲密的
 abandon	verb	放弃；遗弃	The company decided to abandon the old plan.</code></pre>
     </article>
 
     <article>
-      <h2>CSV</h2>
-      <p>CSV 可以包含表头，也可以直接按相同列顺序填写。</p>
+      <h2>TXT · 词典块</h2>
+      <p>单词单独一行，下一行以词性开头；一行内出现多个词性时会自动拆成多个词条。缩进可用 Tab 或空格。</p>
+      <pre><code>accessory
+	n. 同谋，帮凶 adj. 附属的
+
+account for
+  v. 解释；占据
+  phrase. 是……的原因</code></pre>
+    </article>
+
+    <article>
+      <h2>CSV · 推荐批量整理</h2>
+      <p>可以包含表头，也可以直接按相同列顺序填写。释义中的英文逗号请使用标准 CSV 引号包裹。</p>
       <pre><code>word,part_of_speech,meaning,example_sentence
 abandon,verb,放弃；遗弃,The company decided to abandon the old plan.
 ability,noun,能力,She has the ability to solve complex problems.</code></pre>
+    </article>
+
+    <article>
+      <h2>词性与注意事项</h2>
+      <p>支持简写和全称，例如 n./noun、v./verb、adj./adjective、adv./adverb、prep.、pron.、conj.、det.、abbr. 和 phrase.。vt.、vi.、aux. 会统一为 v.。</p>
+      <p>同一个单词的不同词性会保存为独立词条。以 # 开头的行视为注释；缺少单词、词性或释义的内容会跳过并显示具体行号。</p>
     </article>
   </div>
 </section>

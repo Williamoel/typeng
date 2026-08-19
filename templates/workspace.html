@@ -7,7 +7,7 @@
   {% include "_workspace_context.html" %}
   <main class="task-pane">
     {% if selected_word %}
-      <a class="context-back" href="{{ url_for(workspace_endpoint, unit=selected_unit, edit=1 if edit_mode else None) }}" aria-label="返回词表">
+      <a class="context-back" href="{{ url_for(workspace_endpoint, unit=selected_unit, edit=1 if edit_mode else None, search=1 if search_mode else None, q=search_query if search_mode else None) }}" aria-label="返回词表">
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12.5 4.5-5 5 5 5M8 9.5h7"/></svg>
         返回词表
       </a>
@@ -36,6 +36,45 @@
             <button type="submit" class="danger">删除词条</button>
           </form>
         </div>
+        <section class="pattern-editor-section">
+          <div class="detail-section-title"><h2>搭配与用法</h2><span>关联到具体英文释义</span></div>
+          <div class="pattern-editor-list">
+            {% for pattern in selected_patterns %}
+              {% if pattern.is_user %}
+                <form class="pattern-editor-row" action="{{ url_for('edit_word_pattern', word_id=selected_word.id, pattern_id=pattern.id) }}" method="post">
+                  <input name="expression" type="text" value="{{ pattern.expression }}" maxlength="140" aria-label="固定搭配" required>
+                  <select name="definition_number" aria-label="对应英文释义">
+                    <option value="">未关联释义</option>
+                    {% for definition in selected_definitions %}<option value="{{ loop.index }}" {% if pattern.definition_number == loop.index %}selected{% endif %}>释义 {{ loop.index }}</option>{% endfor %}
+                  </select>
+                  <input name="usage_label" type="text" value="{{ pattern.usage_label if pattern.usage_label != '固定搭配' else '' }}" maxlength="60" placeholder="用法标签（可选）" aria-label="用法标签">
+                  <label class="pattern-cloze-toggle"><input name="enabled_for_cloze" type="checkbox" {% if pattern.enabled_for_cloze %}checked{% endif %}> Cloze</label>
+                  <button type="submit" class="text-button">保存</button>
+                  <button type="submit" class="text-button danger-text" formaction="{{ url_for('delete_word_pattern', word_id=selected_word.id, pattern_id=pattern.id) }}" formnovalidate>删除</button>
+                </form>
+              {% endif %}
+            {% endfor %}
+          </div>
+          <form class="pattern-editor-row pattern-add-row" action="{{ url_for('add_word_pattern', word_id=selected_word.id) }}" method="post">
+            <input name="expression" type="text" maxlength="140" placeholder="例如：beyond one’s ken" aria-label="新固定搭配" required>
+            <select name="definition_number" aria-label="对应英文释义">
+              <option value="">未关联释义</option>
+              {% for definition in selected_definitions %}<option value="{{ loop.index }}">释义 {{ loop.index }}</option>{% endfor %}
+            </select>
+            <input name="usage_label" type="text" maxlength="60" placeholder="用法标签（可选）" aria-label="用法标签">
+            <label class="pattern-cloze-toggle"><input name="enabled_for_cloze" type="checkbox" checked> Cloze</label>
+            <button type="submit" class="text-button">添加</button>
+          </form>
+          {% set has_dictionary_pattern = namespace(value=false) %}
+          {% for pattern in selected_patterns %}{% if not pattern.is_user %}{% set has_dictionary_pattern.value = true %}{% endif %}{% endfor %}
+          {% if has_dictionary_pattern.value %}
+            <div class="dictionary-pattern-preview">
+              {% for pattern in selected_patterns %}{% if not pattern.is_user %}
+                <p><span>{{ pattern.definition_number or '—' }}</span>{{ pattern.expression }}{% if pattern.usage_label %}<small>{{ pattern.usage_label }}</small>{% endif %}</p>
+              {% endif %}{% endfor %}
+            </div>
+          {% endif %}
+        </section>
       {% else %}
         <header class="word-detail-head">
           <p class="eyebrow">单元 {{ selected_unit }}</p>
@@ -47,12 +86,28 @@
           </p>
         </header>
         <section class="word-detail-section"><h2>中文释义</h2><p class="detail-meaning">{{ selected_word.meaning }}</p></section>
-        {% set matching_definitions = selected_definition|definition_items(selected_word.part_of_speech) %}
-        {% if matching_definitions %}
+        {% if selected_definitions %}
           <section class="word-detail-section"><h2>英文释义</h2>
             <div class="detail-definition definition-list">
               <span class="definition-pos">{{ selected_word.part_of_speech|display_pos_label }}</span>
-              <ol>{% for definition in matching_definitions %}<li>{{ definition }}</li>{% endfor %}</ol>
+              <ol>{% for definition in selected_definitions %}<li>{{ definition }}</li>{% endfor %}</ol>
+            </div>
+          </section>
+        {% endif %}
+        {% if selected_patterns %}
+          <section class="word-detail-section patterns-section">
+            <div class="detail-section-title"><h2>搭配与用法</h2><span>{{ selected_patterns|length }} 条</span></div>
+            <div class="detail-patterns">
+              {% for pattern in selected_patterns %}
+                <article class="detail-pattern {% if pattern.is_user %}user-pattern{% endif %}">
+                  <span class="source-label">
+                    {% if pattern.is_user %}我的搭配{% else %}Wiktionary{% endif %}
+                    {% if pattern.definition_number %}<span class="example-definition-number" title="对应英文释义 {{ pattern.definition_number }}">{{ pattern.definition_number }}</span>{% endif %}
+                    {% if pattern.usage_label %}<span class="example-usage-label">{{ pattern.usage_label }}</span>{% endif %}
+                  </span>
+                  <p>{{ pattern.expression }}</p>
+                </article>
+              {% endfor %}
             </div>
           </section>
         {% endif %}
@@ -61,7 +116,11 @@
           <div class="detail-examples">
             {% for example in selected_examples %}
               <article class="detail-example {% if example.is_user %}user-example{% endif %}">
-                <span class="source-label">{% if example.is_user %}我的例句{% else %}Wiktionary{% endif %}</span>
+                <span class="source-label">
+                  {% if example.is_user %}我的例句{% else %}Wiktionary{% endif %}
+                  {% if example.definition_number %}<span class="example-definition-number" title="对应英文释义 {{ example.definition_number }}">{{ example.definition_number }}</span>{% endif %}
+                  {% if example.note %}<span class="example-usage-label">{{ example.note }}</span>{% endif %}
+                </span>
                 <p>{{ example.sentence }}</p>
                 {% if example.translation %}<small>{{ example.translation }}</small>{% endif %}
               </article>
@@ -78,6 +137,18 @@
         <label><span>词库名称</span><input name="library_name" type="text" maxlength="80" placeholder="例如：本周生词" autofocus required></label>
         <button type="submit">创建词库</button>
       </form>
+
+    {% elif edit_mode and editor_panel == 'manage' %}
+      <a class="context-back" href="{{ url_for('libraries', edit=1, unit=selected_unit) }}">← 返回编辑</a>
+      <div class="task-intro editor-intro"><p class="eyebrow">管理</p><h1>{{ active_library.name }}</h1><p>更改当前词库名称，或新建、删除词库。</p></div>
+      <form class="workspace-editor-form" action="{{ url_for('rename_library') }}" method="post">
+        <label><span>词库名称</span><input name="library_name" type="text" maxlength="80" value="{{ active_library.name }}" required></label>
+        <button type="submit">保存名称</button>
+      </form>
+      <div class="library-management-actions">
+        <a class="secondary-button" href="{{ url_for('libraries', edit=1, unit=selected_unit, panel='new') }}">新建词库</a>
+        <form action="{{ url_for('delete_library') }}" method="post" onsubmit="return confirm('确定删除当前词库及其中的全部学习记录吗？此操作无法撤销。');"><button class="danger" type="submit">删除当前词库</button></form>
+      </div>
 
     {% elif edit_mode and editor_panel == 'add' %}
       <a class="context-back" href="{{ url_for('libraries', edit=1, unit=selected_unit) }}">← 返回编辑</a>
@@ -104,12 +175,39 @@
 
     {% elif edit_mode and editor_panel == 'format' %}
       <a class="context-back" href="{{ url_for('libraries', edit=1, unit=selected_unit, panel='import') }}">← 返回导入</a>
-      <div class="task-intro editor-intro"><p class="eyebrow">导入</p><h1>格式说明</h1><p>每行一个词条，例句为可选字段。</p></div>
+      <div class="task-intro editor-intro"><p class="eyebrow">导入</p><h1>格式说明</h1><p>UTF-8 编码；支持标准分列、词典块与 CSV。</p></div>
       <div class="inline-format-guide">
-        <section><h2>TXT</h2><p>单词　词性　中文释义　例句（可选）</p><pre>abandon\tv\t放弃\tThey decided to abandon the plan.</pre></section>
-        <section><h2>CSV</h2><p>可以包含表头，也可以直接填写数据。</p><pre>word,part_of_speech,meaning,example_sentence
+        <section><h2>TXT · 标准分列</h2><p>以 Tab、竖线或英文逗号分隔：单词　词性　中文释义　例句（可选）</p><pre>abandon\tv\t放弃\tThey decided to abandon the plan.
+ability|n|能力</pre></section>
+        <section><h2>TXT · 词典块</h2><p>单词单独一行，后续词性释义可分行，也可在一行内自动拆分。</p><pre>accessory
+    n. 同谋，帮凶 adj. 附属的
+
+account for
+    v. 解释；占据
+    phrase. 是……的原因</pre></section>
+        <section><h2>CSV</h2><p>可以包含表头，也可以直接按相同列顺序填写。</p><pre>word,part_of_speech,meaning,example_sentence
 abandon,v,放弃,They decided to abandon the plan.</pre></section>
+        <section><h2>词性</h2><p>支持 n./noun、v./verb、adj./adjective、adv./adverb、prep.、pron.、conj.、det.、abbr.、phrase. 等；vt.、vi.、aux. 统一为 v.。</p><p>同词不同词性会保存为独立词条。以 # 开头的行是注释；无法识别的行会跳过并报告行号。</p></section>
       </div>
+
+    {% elif edit_mode and editor_panel == 'export' %}
+      <a class="context-back" href="{{ url_for('libraries', edit=1, unit=selected_unit) }}">← 返回编辑</a>
+      <div class="task-intro editor-intro"><p class="eyebrow">导出</p><h1>导出词表</h1><p>选择范围和格式；文件使用 UTF-8 编码。</p></div>
+      <form class="workspace-editor-form export-library-form" action="{{ url_for('export_library') }}" method="get">
+        <fieldset>
+          <legend>导出范围</legend>
+          <label><input type="radio" name="scope" value="library" checked> 整个词库</label>
+          <label><input type="radio" name="scope" value="unit"> 当前单元 · {{ selected_unit }}</label>
+        </fieldset>
+        <fieldset>
+          <legend>文件格式</legend>
+          <label><input type="radio" name="format" value="csv" checked> CSV · 详细字段</label>
+          <label><input type="radio" name="format" value="txt"> TXT · 可重新导入</label>
+        </fieldset>
+        <input type="hidden" name="unit" value="{{ selected_unit }}">
+        <button type="submit">下载词表</button>
+      </form>
+      <p class="editor-footnote">CSV 包含单元、音标、英文释义、学习状态和用户例句；TXT 保留单词、词性、中文释义与用户例句。</p>
 
     {% elif edit_mode and editor_panel == 'dedupe' %}
       <a class="context-back" href="{{ url_for('libraries', edit=1, unit=selected_unit) }}">← 返回编辑</a>

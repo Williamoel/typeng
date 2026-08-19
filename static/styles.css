@@ -1,3 +1,19 @@
+@font-face {
+  font-family: "TypEng Noto Sans SC";
+  src: url("fonts/noto-sans-sc-chinese-simplified-400-normal.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "TypEng Noto Sans SC";
+  src: url("fonts/noto-sans-sc-chinese-simplified-500-normal.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 500 700;
+  font-display: swap;
+}
+
 :root {
   color-scheme: light;
   --paper: #f7f7f5;
@@ -10,7 +26,7 @@
   --danger: #6b2020;
   --sidebar: 216px;
   --radius: 8px;
-  --sans: Inter, "SF Pro Text", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --sans: Inter, "SF Pro Text", "TypEng Noto Sans SC", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --serif: Iowan Old Style, Baskerville, "Times New Roman", serif;
 }
 
@@ -290,3 +306,53 @@ p { margin-top: 0; }
 .docs-grid article { border-top: 1px solid var(--line); padding-top: 18px; }
 .docs-grid p { color: var(--muted); }
 .docs-grid pre { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); padding: 14px; }
+/* Hosted invitation gate */
+.access-page { min-height: 100svh; margin: 0; background: #fff; color: #111; }
+.access-shell { width: min(100% - 40px, 520px); min-height: 100svh; margin: 0 auto; display: grid; align-content: center; gap: 72px; }
+.access-shell .brand { color: #111; font-family: var(--serif); font-size: 30px; text-decoration: none; }
+.access-shell section { border-top: 1px solid var(--line); padding-top: 32px; }
+.access-shell h1 { margin: 0; font-size: clamp(34px, 7vw, 54px); font-weight: 540; letter-spacing: -.04em; }
+.access-shell section > p { margin: 12px 0 34px; color: var(--muted); font-size: 13px; }
+.access-shell form { display: grid; gap: 12px; }
+.access-shell label { color: var(--muted); font-size: 11px; }
+.access-shell input { min-height: 52px; border: 0; border-bottom: 1px solid #111; border-radius: 0; background: transparent; padding: 0; font-size: 18px; box-shadow: none; }
+.access-shell button { min-height: 50px; margin-top: 16px; }
+
+.auth-page { min-height: 100svh; margin: 0; background: #f1f1ee; }
+.auth-shell {
+  width: min(920px, calc(100% - 40px));
+  min-height: min(680px, calc(100svh - 40px));
+  margin: 20px auto;
+  border: 1px solid #d8d8d3;
+  border-radius: 10px;
+  background: #fbfbf9;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  overflow: hidden;
+}
+.auth-brand-panel { background: #101111; color: #fff; display: flex; flex-direction: column; padding: 38px 34px 30px; }
+.auth-brand-panel .brand { color: #fff; font-family: var(--serif); font-size: 28px; font-weight: 600; letter-spacing: -.025em; }
+.auth-brand-panel p { margin: auto 0 0; color: #7d7e7a; font-size: 8px; letter-spacing: .16em; }
+.auth-form-panel { width: min(100%, 560px); align-self: center; justify-self: center; padding: 54px 48px; }
+.auth-tabs { border-bottom: 1px solid var(--line); display: flex; gap: 28px; }
+.auth-tabs a { border-bottom: 2px solid transparent; color: var(--muted); padding: 0 1px 10px; font-size: 12px; }
+.auth-tabs a.active { border-color: #111; color: #111; font-weight: 650; }
+.auth-copy { margin: 48px 0 34px; }
+.auth-copy h1 { margin: 0; font-size: clamp(36px, 5vw, 52px); font-weight: 610; letter-spacing: -.045em; }
+.auth-copy p { margin: 12px 0 0; color: var(--muted); font-size: 13px; }
+.auth-form-panel form { display: grid; gap: 10px; }
+.auth-form-panel label { margin-top: 8px; color: var(--muted); font-size: 11px; }
+.auth-form-panel input { width: 100%; min-height: 48px; border: 0; border-bottom: 1px solid #aaa; border-radius: 0; background: transparent; padding: 0; font-size: 17px; box-shadow: none; }
+.auth-form-panel input:focus { border-color: #111; box-shadow: none; }
+.auth-form-panel button { min-height: 50px; margin-top: 22px; }
+.auth-error { margin: 8px 0 0; color: var(--danger); font-size: 12px; }
+
+@media (max-width: 640px) {
+  .auth-shell { width: calc(100% - 20px); min-height: calc(100svh - 20px); margin: 10px auto; grid-template-columns: 86px minmax(0, 1fr); }
+  .auth-brand-panel { padding: 28px 14px 20px; }
+  .auth-brand-panel .brand { font-size: 19px; }
+  .auth-form-panel { padding: 38px 24px; }
+  .auth-copy { margin-top: 38px; }
+  .auth-copy h1 { font-size: 36px; }
+}
+.access-error { margin: 0; color: var(--danger); font-size: 12px; }

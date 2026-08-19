@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: typeng-web
+    runtime: docker
+    plan: starter
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: TYPENG_WEB_MODE
+        value: "1"
+      - key: TYPENG_SECRET_KEY
+        generateValue: true
+      - key: TYPENG_ALLOWED_HOSTS
+        sync: false
+      - key: TYPENG_COOKIE_SECURE
+        value: "1"
+      - key: TYPENG_HOME
+        value: /var/lib/typeng
+      - key: TYPENG_LEXICON_PATH
+        value: /var/lib/typeng/lexicon/typeng-lexicon.sqlite3
+      - key: TYPENG_LEXICON_URL
+        value: https://github.com/Williamoel/typeng/releases/latest/download/typeng-lexicon.sqlite3
+    disk:
+      name: typeng-data
+      mountPath: /var/lib/typeng
+      sizeGB: 1

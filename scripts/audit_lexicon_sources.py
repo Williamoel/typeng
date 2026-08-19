@@ -91,7 +91,11 @@ def scan_wiktionary(
                 for example in sense.get("examples") or []:
                     if not isinstance(example, dict):
                         continue
-                    sentence = extract_example_sentence(str(example.get("text") or ""), word)
+                    sentence = extract_example_sentence(
+                        str(example.get("text") or ""),
+                        word,
+                        example.get("bold_text_offsets"),
+                    )
                     if usable_wiktionary_example(sentence, word):
                         examples.add(pair)
                         break

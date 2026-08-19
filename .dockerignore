@@ -1,0 +1,16 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.py[cod]
+*.log
+.env
+data
+build
+dist
+kaikki.org-dictionary-English.jsonl
+resources/ecdict.csv
+resources/efllex/*.tsv
+resources/wiktionary/*.jsonl
+resources/tatoeba
+resources/wordnet

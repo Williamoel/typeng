@@ -4,13 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}TypEng{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='8') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='9') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='library.css', v='6') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='practice.css', v='6') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='workspace.css', v='10') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='workspace.css', v='12') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='responsive.css', v='6') }}">
   <script src="{{ url_for('static', filename='audio.js') }}" defer></script>
-  <script src="{{ url_for('static', filename='library.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='library.js', v='2') }}" defer></script>
+  <script src="{{ url_for('static', filename='practice.js', v='1') }}" defer></script>
 </head>
 <body class="{% block body_class %}{% endblock %}">
   <div class="app-frame">

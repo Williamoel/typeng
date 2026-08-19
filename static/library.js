@@ -95,6 +95,64 @@
     }, true);
   }
 
+  function bindUnitStrips() {
+    document.querySelectorAll("[data-unit-strip-shell]").forEach((shell) => {
+      const strip = shell.querySelector("[data-unit-strip]");
+      const previous = shell.querySelector('[data-unit-scroll="previous"]');
+      const next = shell.querySelector('[data-unit-scroll="next"]');
+      if (!strip || !previous || !next) {
+        return;
+      }
+
+      const updateControls = () => {
+        const overflowing = strip.scrollWidth > strip.clientWidth + 1;
+        previous.hidden = !overflowing;
+        next.hidden = !overflowing;
+        if (!overflowing) {
+          return;
+        }
+        const maximum = Math.max(0, strip.scrollWidth - strip.clientWidth);
+        previous.disabled = strip.scrollLeft <= 1;
+        next.disabled = strip.scrollLeft >= maximum - 1;
+      };
+      const scrollPage = (direction) => {
+        const distance = Math.max(120, strip.clientWidth * 0.75);
+        strip.scrollBy({ left: direction * distance, behavior: "smooth" });
+      };
+
+      previous.addEventListener("click", () => scrollPage(-1));
+      next.addEventListener("click", () => scrollPage(1));
+      strip.addEventListener("scroll", updateControls, { passive: true });
+      strip.addEventListener("keydown", (event) => {
+        if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+          event.preventDefault();
+          scrollPage(event.key === "ArrowLeft" ? -1 : 1);
+        } else if (event.key === "Home" || event.key === "End") {
+          event.preventDefault();
+          strip.scrollTo({
+            left: event.key === "Home" ? 0 : strip.scrollWidth,
+            behavior: "smooth",
+          });
+        }
+      });
+
+      window.requestAnimationFrame(() => {
+        updateControls();
+        if (strip.scrollWidth > strip.clientWidth + 1) {
+          strip.querySelector("a.active")?.scrollIntoView({
+            block: "nearest",
+            inline: "center",
+          });
+          window.requestAnimationFrame(updateControls);
+        }
+      });
+      if (typeof ResizeObserver !== "undefined") {
+        const observer = new ResizeObserver(updateControls);
+        observer.observe(strip);
+      }
+    });
+  }
+
   function clearRow(row) {
     row.querySelectorAll("input, select").forEach((field) => {
       field.value = "";
@@ -362,6 +420,7 @@
   document.addEventListener("DOMContentLoaded", () => {
     restoreScrollPosition();
     bindScrollPersistence();
+    bindUnitStrips();
     bindAddWordRows();
     bindBulkDelete();
     bindExcludeForm();

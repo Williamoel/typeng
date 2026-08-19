@@ -81,7 +81,7 @@
       {% if prompt_mode == "cloze" and cloze_text %}
         {% set cloze_parts = cloze_text.split('____', 1) %}
         {% set answer_limit = (cloze_answer or word.word)|length + 5 %}
-        {% if word.example_note %}
+        {% if word.example_note and word.cloze_material_type != 'pattern' %}
           <p class="example-note-warning" role="note">提示：这个例句可能读起来偏生僻：{{ word.example_note }}（仅供拼写练习参考）</p>
         {% endif %}
         {% if cloze_truncated %}
@@ -91,7 +91,7 @@
           <h1 class="cloze-prompt inline-cloze">
             <span>{{ cloze_parts[0] }}</span><input name="answer" type="text" aria-label="缺少的单词" maxlength="{{ answer_limit }}" style="--answer-ch: {{ answer_limit }};" autofocus required><span>{{ cloze_parts[1] if cloze_parts|length > 1 else "" }}</span>
           </h1>
-          {% if word.example_source == 'user' %}<p class="user-example-priority">我的例句</p>{% endif %}
+          {% if word.cloze_material_type == 'pattern' %}<p class="user-example-priority">{% if word.example_source == 'user' %}我的搭配{% else %}搭配与用法{% endif %}{% if word.example_note %} · {{ word.example_note }}{% endif %}</p>{% elif word.example_source == 'user' %}<p class="user-example-priority">我的例句</p>{% endif %}
           <button type="submit" class="practice-submit">检查</button>
           <p class="keyboard-hint">按 <kbd>Enter</kbd> 检查</p>
         </form>
@@ -148,6 +148,22 @@
           {% endif %}
         </form>
       {% endif %}
+    {% endif %}
+
+    {% if awaiting_next and prompt_mode == "cloze" and cloze_feedback %}
+      <section class="cloze-feedback-panel" aria-labelledby="cloze-feedback-title" data-cloze-feedback>
+        <p id="cloze-feedback-title">这个例句怎么样？</p>
+        <div class="cloze-feedback-options">
+          {% for rating, label in [("too_hard", "太难"), ("too_easy", "太简单"), ("unsuitable", "不合适"), ("incorrect", "例句有误")] %}
+            <form action="{{ url_for('submit_cloze_feedback') }}" method="post">
+              <input type="hidden" name="feedback_token" value="{{ cloze_feedback.token }}">
+              <input type="hidden" name="rating" value="{{ rating }}">
+              <button type="submit" class="cloze-feedback-option{% if cloze_feedback.submitted_rating == rating %} selected{% endif %}" aria-pressed="{{ 'true' if cloze_feedback.submitted_rating == rating else 'false' }}">{{ label }}</button>
+            </form>
+          {% endfor %}
+        </div>
+        <span class="cloze-feedback-status" aria-live="polite">{% if cloze_feedback.submitted_rating %}已记录，可以继续下一题{% else %}可选，不影响练习进度{% endif %}</span>
+      </section>
     {% endif %}
   </article>
 </section></main></section>

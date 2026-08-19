@@ -1,5 +1,10 @@
 # Wiktionary exam POS index
 
+`usage-patterns.tsv` is an audited supplement for fixed expressions present
+in Wiktionary Usage notes but omitted from the Kaikki JSONL export. Rows keep
+their source URL and are consumed only while building the local lookup cache;
+the application never fetches them at request time.
+
 `exam-pos-index.tsv` is a POS-presence-only derivative of the English Kaikki
 Wiktionary JSONL snapshot. It covers the 14,942 words appearing in TypEng's
 ECDICT exam candidates and contains no definitions or examples.

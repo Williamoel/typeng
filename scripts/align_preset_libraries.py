@@ -66,9 +66,10 @@ def main() -> None:
                 )
             for word_id, entry in kept_by_id.items():
                 db.execute(
-                    "UPDATE words SET part_of_speech = ?, meaning = ?, definition = ?, updated_at = CURRENT_TIMESTAMP "
+                    "UPDATE words SET word = ?, part_of_speech = ?, meaning = ?, definition = ?, updated_at = CURRENT_TIMESTAMP "
                     "WHERE id = ? AND library_id = ?",
                     (
+                        entry["word"],
                         entry["part_of_speech"],
                         entry["meaning"],
                         entry["definition"],

@@ -11,7 +11,7 @@ import sqlite3
 from pathlib import Path
 
 
-CACHE_SCHEMA_VERSION = 3
+CACHE_SCHEMA_VERSION = 5
 CACHE_TABLES = (
     "ecdict_lookup",
     "ecdict_preset_entries",
@@ -19,6 +19,8 @@ CACHE_TABLES = (
     "wiktionary_examples",
     "wiktionary_definitions",
     "wiktionary_indexed_words",
+    "wiktionary_headwords",
+    "wiktionary_patterns",
     "wiktionary_exam_parts",
 )
 SIGNATURE_KEYS = (

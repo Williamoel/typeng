@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import csv
+import hashlib
+import io
 import os
 import random
 import re
+import secrets
 import sqlite3
 import sys
 import threading
@@ -10,7 +14,9 @@ from datetime import datetime, timedelta, timezone
 from math import ceil
 from pathlib import Path
 
-from flask import Flask, abort, flash, g, redirect, render_template, request, session, url_for
+from flask import Flask, abort, flash, g, jsonify, redirect, render_template, request, send_file, session, url_for
+from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from typeng.constants import (
     BLOCKED_EXAMPLE_WORDS,
@@ -52,13 +58,16 @@ from typeng.preset_policy import apply_exam_policy, ensure_wiktionary_exam_pos_i
 from typeng.lexicon_cache import lookup_available
 from typeng.paths import resolve_app_home, resolve_bundle_dir, resolve_resource_dir
 from typeng.performance import register_request_timing
-from typeng.security import is_local_host, is_local_origin, load_or_create_secret
+from typeng.security import host_name, is_local_host, is_local_origin, is_same_origin, load_or_create_secret, normalize_username
 from typeng import schema as _schema
 from typeng.repositories import libraries as library_repository
 from typeng.repositories import examples as example_repository
+from typeng.repositories import feedback as feedback_repository
+from typeng.repositories import patterns as pattern_repository
 from typeng.repositories import lexicon as lexicon_repository
 from typeng.repositories import units as unit_repository
 from typeng.repositories import words as word_repository
+from typeng.repositories import users as user_repository
 from typeng.services import review as review_service
 
 SOURCE_ROOT = Path(__file__).resolve().parent
@@ -71,23 +80,39 @@ DB_PATH = DATA_DIR / "typeng.db"
 BUNDLED_ECDICT_PATH = RESOURCE_DIR / "ecdict.csv"
 ECDICT_CACHE_PATH = DATA_DIR / "ecdict.csv"
 ECDICT_SOURCE_URL = "https://raw.githubusercontent.com/skywind3000/ECDICT/master/ecdict.csv"
-ECDICT_LOOKUP_SCHEMA_VERSION = 4
+ECDICT_LOOKUP_SCHEMA_VERSION = 6
 EFLLEx_PATH = RESOURCE_DIR / "efllex" / "EFLLex.tsv"
 WIKTIONARY_EXAM_POS_PATH = RESOURCE_DIR / "wiktionary" / "exam-pos-index.tsv"
 WIKTIONARY_DIR = RESOURCE_DIR / "wiktionary"
+WIKTIONARY_USAGE_PATTERNS_PATH = WIKTIONARY_DIR / "usage-patterns.tsv"
 WIKTIONARY_JSONL_CANDIDATES = [
     APP_HOME / "kaikki.org-dictionary-English.jsonl",
     BASE_DIR / "kaikki.org-dictionary-English.jsonl",
     WIKTIONARY_DIR / "kaikki.org-dictionary-English.jsonl",
 ]
-WIKTIONARY_SCHEMA_VERSION = 8
-APP_SCHEMA_VERSION = 5
-PREBUILT_LEXICON_PATH = RESOURCE_DIR / "lexicon" / "typeng-lexicon.sqlite3"
+WIKTIONARY_SCHEMA_VERSION = 15
+APP_SCHEMA_VERSION = 10
+PREBUILT_LEXICON_PATH = Path(
+    os.environ.get(
+        "TYPENG_LEXICON_PATH",
+        str(RESOURCE_DIR / "lexicon" / "typeng-lexicon.sqlite3"),
+    )
+).expanduser().resolve()
+WEB_MODE = os.environ.get("TYPENG_WEB_MODE") == "1"
+WEB_ALLOWED_HOSTS = {
+    host.strip().casefold()
+    for host in os.environ.get("TYPENG_ALLOWED_HOSTS", "").split(",")
+    if host.strip()
+}
 app = Flask(
     __name__,
     template_folder=str(APP_ROOT / "templates"),
     static_folder=str(APP_ROOT / "static"),
 )
+if WEB_MODE:
+    # Hosted deployments terminate TLS at a trusted reverse proxy. Only the
+    # nearest proxy hop is accepted so origin checks see the public URL.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024
 if not getattr(sys, "frozen", False):
     # Source development is collaborative and templates/styles change often.
@@ -103,16 +128,175 @@ app.add_template_filter(display_pos_label, "display_pos_label")
 
 
 app.config["SECRET_KEY"] = os.environ.get("TYPENG_SECRET_KEY") or load_or_create_secret(DATA_DIR)
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=(
+        WEB_MODE and os.environ.get("TYPENG_COOKIE_SECURE", "1") != "0"
+    ),
+)
 
-
+if WEB_MODE and not os.environ.get("TYPENG_SECRET_KEY"):
+    raise RuntimeError("TYPENG_SECRET_KEY is required in web mode")
 @app.before_request
 def protect_local_app() -> None:
+    if WEB_MODE:
+        if WEB_ALLOWED_HOSTS and host_name(request.host) not in WEB_ALLOWED_HOSTS:
+            abort(403)
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            origin = request.headers.get("Origin")
+            if origin and not is_same_origin(origin, request.host_url):
+                abort(403)
+        ensure_db()
+        public_endpoints = {"static", "access_web", "login", "register", "health"}
+        g.current_user = None
+        user_id = session.get("user_id")
+        if user_id is not None:
+            try:
+                g.current_user = user_repository.fetch_by_id(get_db(), int(user_id))
+            except (TypeError, ValueError):
+                g.current_user = None
+        if g.current_user is None:
+            session.pop("user_id", None)
+            session.pop("active_library_id", None)
+            if request.endpoint not in public_endpoints:
+                return redirect(url_for("login", next=request.full_path.rstrip("?")))
+        return
+
     if not is_local_host(request.host):
         abort(403)
     if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
         origin = request.headers.get("Origin")
         if origin and not is_local_origin(origin):
             abort(403)
+
+
+@app.get("/access")
+def access_web():
+    return redirect(url_for("login" if WEB_MODE else "index"))
+
+
+def auth_redirect_target() -> str:
+    target = request.form.get("next", request.args.get("next", "")).strip()
+    if target.startswith("/") and not target.startswith("//"):
+        return target
+    return url_for("index")
+
+
+def registration_device() -> tuple[str, str | None]:
+    token = request.cookies.get("typeng_device", "").strip()
+    new_token = None
+    if token:
+        identity = f"device:{token}"
+    else:
+        new_token = secrets.token_urlsafe(24)
+        identity = f"ip:{request.remote_addr or 'unknown'}"
+    digest = hashlib.sha256(
+        f"{app.config['SECRET_KEY']}:{identity}".encode("utf-8")
+    ).hexdigest()
+    return digest, new_token
+
+
+def no_store_auth_response(template: str, **context):
+    response = app.make_response(render_template(template, **context))
+    response.headers["Cache-Control"] = "no-store"
+    _fingerprint, new_token = registration_device()
+    if new_token:
+        response.set_cookie(
+            "typeng_device", new_token, max_age=365 * 24 * 60 * 60,
+            httponly=True, secure=app.config["SESSION_COOKIE_SECURE"], samesite="Lax",
+        )
+    return response
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if not WEB_MODE:
+        return redirect(url_for("index"))
+    if getattr(g, "current_user", None) is not None:
+        return redirect(url_for("index"))
+    error = ""
+    username = ""
+    if request.method == "POST":
+        username, username_key = normalize_username(request.form.get("username", ""))
+        user = user_repository.fetch_by_key(get_db(), username_key)
+        password = request.form.get("password", "")
+        if user is not None and check_password_hash(str(user["password_hash"]), password):
+            session.clear()
+            session["user_id"] = int(user["id"])
+            user_repository.mark_login(get_db(), int(user["id"]))
+            return redirect(auth_redirect_target())
+        error = "用户名或密码不正确。"
+    return no_store_auth_response(
+        "auth.html", auth_mode="login", error=error, username=username,
+        next_url=request.form.get("next", request.args.get("next", "")),
+    )
+
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if not WEB_MODE:
+        return redirect(url_for("index"))
+    if getattr(g, "current_user", None) is not None:
+        return redirect(url_for("index"))
+    error = ""
+    username = ""
+    if request.method == "POST":
+        device_hash, _new_token = registration_device()
+        today = today_iso()
+        if user_repository.registration_attempt_count(get_db(), device_hash, today) >= 100:
+            return no_store_auth_response(
+                "auth.html", auth_mode="register",
+                error="这台设备今天的注册尝试次数已达到上限，请明天再试。",
+                username="", next_url="",
+            ), 429
+
+        username, username_key = normalize_username(request.form.get("username", ""))
+        password = request.form.get("password", "")
+        success = False
+        if not re.fullmatch(r"[A-Za-z0-9_\u3400-\u9FFF]{1,32}", username):
+            error = "用户名限 1–32 个中文、英文字母、数字或下划线。"
+        elif len(password) < 6:
+            error = "密码至少需要 6 位。"
+        elif len(password) > 256:
+            error = "密码不能超过 256 位。"
+        elif user_repository.fetch_by_key(get_db(), username_key) is not None:
+            error = "该用户名已经被使用。"
+        else:
+            try:
+                user_id = user_repository.create(
+                    get_db(), username, username_key, generate_password_hash(password)
+                )
+                cursor = get_db().execute(
+                    "INSERT INTO libraries (user_id, name) VALUES (?, ?)",
+                    (user_id, "Default Library"),
+                )
+                get_db().commit()
+                session.clear()
+                session["user_id"] = user_id
+                session["active_library_id"] = int(cursor.lastrowid)
+                success = True
+            except sqlite3.IntegrityError:
+                get_db().rollback()
+                error = "该用户名已经被使用。"
+        user_repository.record_registration_attempt(get_db(), device_hash, today, success)
+        if success:
+            return redirect(url_for("index"))
+    return no_store_auth_response(
+        "auth.html", auth_mode="register", error=error, username=username, next_url="",
+    )
+
+
+@app.post("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login" if WEB_MODE else "index"))
+
+
+@app.get("/health")
+def health():
+    get_db().execute("SELECT 1").fetchone()
+    return jsonify({"status": "ok", "mode": "web" if WEB_MODE else "local"})
 
 
 def get_db() -> sqlite3.Connection:
@@ -148,11 +332,14 @@ _wiktionary.configure(
     path_provider=lambda: wiktionary_jsonl_path(),
     signature_provider=lambda: wiktionary_source_signature(),
     available_provider=lambda: wiktionary_lookup_available(),
+    usage_patterns_provider=lambda: WIKTIONARY_USAGE_PATTERNS_PATH,
 )
 ensure_wiktionary_lookup_index = _wiktionary.ensure_wiktionary_lookup_index
 ranked_wiktionary_example_candidates = _wiktionary.ranked_wiktionary_example_candidates
 lookup_wiktionary_example = _wiktionary.lookup_wiktionary_example
 lookup_wiktionary_definition = _wiktionary.lookup_wiktionary_definition
+lookup_wiktionary_definition_records = _wiktionary.lookup_wiktionary_definition_records
+lookup_wiktionary_patterns = _wiktionary.lookup_wiktionary_patterns
 load_ecdict_data = _ecdict.load_ecdict_data
 _ecdict.configure(
     db_provider=lambda: get_db(),
@@ -391,12 +578,16 @@ def example_candidates_for_word(
             sentence = str(row["example_sentence"] or "").strip()
             if not sentence or sentence in seen:
                 continue
+            is_excerpt = sentence.startswith("… ") or sentence.endswith(" …")
+            if is_excerpt and candidates:
+                continue
             seen.add(sentence)
             candidates.append({
                 "sentence": sentence,
                 "translation": None,
                 "note": _lookup_note(row),
                 "definition": row["definition"],
+                "sense_rank": row["sense_rank"],
                 "source": "wiktionary",
                 "is_user": False,
             })
@@ -409,9 +600,13 @@ def example_candidates_for_word(
 
     legacy = str(value("example_sentence") or "").strip()
     legacy_is_user = value("example_source") == "user"
+    legacy_is_deprioritized = (
+        len(legacy) > 240 or legacy.startswith("… ") or legacy.endswith(" …")
+    )
     if (
         legacy
         and legacy not in seen
+        and not (candidates and legacy_is_deprioritized and not legacy_is_user)
         and valid_example_sentence(legacy, str(word["word"]))
         and (legacy_is_user or usable_wiktionary_example(legacy, str(word["word"])))
     ):
@@ -425,13 +620,97 @@ def example_candidates_for_word(
     return candidates
 
 
+def pattern_candidates_for_word(
+    word: sqlite3.Row | dict[str, object]
+) -> list[dict[str, object]]:
+    """Return user-authored and dictionary fixed expressions for one word."""
+    word_id = int(word["id"])
+    try:
+        part_of_speech = str(word["part_of_speech"])
+    except (KeyError, IndexError):
+        part_of_speech = ""
+    candidates: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for row in pattern_repository.fetch_user_patterns(get_db(), word_id):
+        expression = str(row["expression"] or "").strip()
+        if not expression or expression.casefold() in seen:
+            continue
+        seen.add(expression.casefold())
+        candidates.append(
+            {
+                "id": int(row["id"]),
+                "expression": expression,
+                "definition": row["definition"],
+                "sense_rank": row["sense_rank"],
+                "usage_label": row["usage_label"] or "固定搭配",
+                "source": "user",
+                "source_ref": None,
+                "enabled_for_cloze": bool(row["enabled_for_cloze"]),
+                "is_user": True,
+            }
+        )
+    if part_of_speech and wiktionary_lookup_available():
+        for item in lookup_wiktionary_patterns(
+            str(word["word"]), part_of_speech
+        ):
+            expression = str(item["expression"] or "").strip()
+            if not expression or expression.casefold() in seen:
+                continue
+            seen.add(expression.casefold())
+            candidates.append(dict(item))
+    return candidates
+
+
+def cloze_material_candidates(
+    word: sqlite3.Row | dict[str, object]
+) -> list[dict[str, object]]:
+    """Choose material by type so numerous examples do not bury patterns."""
+    patterns = [
+        {
+            "sentence": item["expression"],
+            "translation": None,
+            "note": item.get("usage_label"),
+            "source": item.get("source"),
+            "is_user": bool(item.get("is_user")),
+            "material_type": "pattern",
+            "definition": item.get("definition"),
+            "sense_rank": item.get("sense_rank"),
+        }
+        for item in pattern_candidates_for_word(word)
+        if item.get("enabled_for_cloze")
+        and cloze_prompt(str(item.get("expression") or ""), str(word["word"]))
+    ]
+    examples = [
+        {**item, "material_type": "example"}
+        for item in example_candidates_for_word(word)
+    ]
+    user_groups = [
+        group for group in (
+            [item for item in patterns if item["is_user"]],
+            [item for item in examples if item["is_user"]],
+        ) if group
+    ]
+    dictionary_groups = [
+        group for group in (
+            [item for item in patterns if not item["is_user"]],
+            [item for item in examples if not item["is_user"]],
+        ) if group
+    ]
+    groups = user_groups or dictionary_groups
+    if not groups:
+        return []
+    # Return a type-balanced order. The caller picks the first group and then
+    # one row inside it, so 10 examples do not outweigh one fixed expression.
+    selected_group = random.choice(groups)
+    return selected_group
+
+
 def practice_word_with_example(word: sqlite3.Row) -> dict[str, object]:
-    """Choose one stable example for the current question, preferring the user's."""
+    """Choose stable Cloze material, preferring user-authored material."""
     cached = session.get("practice_example") or {}
     if int(cached.get("word_id", -1)) != int(word["id"]):
-        candidates = example_candidates_for_word(word)
-        user_candidates = [item for item in candidates if item["is_user"]]
-        selected = user_candidates[0] if user_candidates else (random.choice(candidates) if candidates else None)
+        candidates = cloze_material_candidates(word)
+        selected = random.choice(candidates) if candidates else None
         cached = {"word_id": int(word["id"]), **selected} if selected else {"word_id": int(word["id"])}
         session["practice_example"] = cached
     result = dict(word)
@@ -439,6 +718,7 @@ def practice_word_with_example(word: sqlite3.Row) -> dict[str, object]:
     result["example_translation"] = cached.get("translation")
     result["example_note"] = cached.get("note")
     result["example_source"] = cached.get("source")
+    result["cloze_material_type"] = cached.get("material_type")
     return result
 
 
@@ -446,7 +726,7 @@ def ids_with_cloze(rows: list[sqlite3.Row], limit: int) -> list[int]:
     ids: list[int] = []
     for row in rows:
         full_word = fetch_word(int(row["id"]))
-        if full_word is not None and example_candidates_for_word(full_word):
+        if full_word is not None and cloze_material_candidates(full_word):
             ids.append(int(row["id"]))
             if len(ids) >= limit:
                 break
@@ -454,7 +734,7 @@ def ids_with_cloze(rows: list[sqlite3.Row], limit: int) -> list[int]:
 
 
 def cloze_ids_from_ids(ids: list[int]) -> list[int]:
-    return [int(row["id"]) for row in fetch_words_by_ids(ids) if example_candidates_for_word(row)]
+    return [int(row["id"]) for row in fetch_words_by_ids(ids) if cloze_material_candidates(row)]
 
 
 def start_pending_cloze_round() -> bool:
@@ -511,7 +791,11 @@ def wiktionary_source_signature() -> str | None:
     if not path:
         return None
     stat = path.stat()
-    return f"{path.name}:{stat.st_size}:{int(stat.st_mtime)}:{WIKTIONARY_SCHEMA_VERSION}"
+    supplement = ""
+    if WIKTIONARY_USAGE_PATTERNS_PATH.is_file():
+        extra = WIKTIONARY_USAGE_PATTERNS_PATH.stat()
+        supplement = f":{extra.st_size}:{int(extra.st_mtime)}"
+    return f"{path.name}:{stat.st_size}:{int(stat.st_mtime)}:{WIKTIONARY_SCHEMA_VERSION}{supplement}"
 
 
 
@@ -692,11 +976,16 @@ def reset_review_schedule(word_id: int) -> None:
 
 
 def fetch_libraries() -> list[sqlite3.Row]:
-    return library_repository.fetch_all(get_db())
+    return library_repository.fetch_all(get_db(), current_user_id())
 
 
 def fetch_library(library_id: int) -> sqlite3.Row | None:
-    return library_repository.fetch_one(get_db(), library_id)
+    return library_repository.fetch_one(get_db(), library_id, current_user_id())
+
+
+def current_user_id() -> int | None:
+    user = getattr(g, "current_user", None)
+    return int(user["id"]) if WEB_MODE and user is not None else None
 
 
 def get_active_library_id() -> int:
@@ -707,11 +996,21 @@ def get_active_library_id() -> int:
         if row:
             return int(row["id"])
 
-    row = db.execute("SELECT id FROM libraries ORDER BY id ASC LIMIT 1").fetchone()
+    user_id = current_user_id()
+    row = db.execute(
+        "SELECT id FROM libraries WHERE user_id IS ? ORDER BY id ASC LIMIT 1",
+        (user_id,),
+    ).fetchone()
     if row is None:
-        db.execute("INSERT INTO libraries (name) VALUES (?)", ("Default Library",))
+        db.execute(
+            "INSERT INTO libraries (user_id, name) VALUES (?, ?)",
+            (user_id, "Default Library"),
+        )
         db.commit()
-        row = db.execute("SELECT id FROM libraries ORDER BY id ASC LIMIT 1").fetchone()
+        row = db.execute(
+            "SELECT id FROM libraries WHERE user_id IS ? ORDER BY id ASC LIMIT 1",
+            (user_id,),
+        ).fetchone()
     session["active_library_id"] = int(row["id"])
     return int(row["id"])
 
@@ -721,11 +1020,13 @@ def get_active_library() -> sqlite3.Row:
 
 
 def get_or_create_library(name: str) -> int:
-    return library_repository.get_or_create(get_db(), name)
+    return library_repository.get_or_create(get_db(), name, current_user_id())
 
 
 def reset_ecdict_library(library_id: int) -> None:
     library_repository.delete_source_words(get_db(), library_id, "ECDICT")
+    unit_repository.compact_empty_units(get_db(), library_id)
+    get_db().commit()
 
 
 def prune_word_ids_from_session(word_ids: set[int]) -> None:
@@ -757,6 +1058,7 @@ def delete_word_ids(word_ids: set[int], library_id: int) -> int:
             [library_id, *batch],
         )
         deleted += int(cursor.rowcount)
+    unit_repository.compact_empty_units(get_db(), library_id)
     get_db().commit()
     prune_word_ids_from_session(word_ids)
     return deleted
@@ -1046,6 +1348,7 @@ def clear_practice_session() -> None:
     session.pop("show_definition", None)
     session.pop("show_phonetic", None)
     session.pop("practice_example", None)
+    session.pop("cloze_feedback_context", None)
 
 
 def redirect_back(default_endpoint: str = "index"):
@@ -1087,8 +1390,19 @@ def render_workspace(mode: str):
     }[mode]
     endpoint = {"home": "index", "learned": "learned", "wrong": "wrong", "libraries": "libraries"}[mode]
     edit_mode = mode == "libraries" and request.args.get("edit") == "1"
+    raw_search_query = request.args.get("q", "").strip()
+    search_mode = (
+        mode == "libraries"
+        and not edit_mode
+        and (request.args.get("search") == "1" or "q" in request.args)
+    )
+    search_query = (
+        raw_search_query
+        if re.fullmatch(r"[A-Za-z][A-Za-z '\-]*", raw_search_query)
+        else ""
+    )
     editor_panel = request.args.get("panel", "") if edit_mode else ""
-    if editor_panel not in {"", "new", "add", "import", "format", "dedupe", "presets"}:
+    if editor_panel not in {"", "new", "add", "import", "format", "export", "dedupe", "presets", "manage"}:
         editor_panel = ""
     try:
         selected_unit = max(1, int(request.args.get("unit", "1")))
@@ -1097,10 +1411,19 @@ def render_workspace(mode: str):
     units = unit_repository.summaries(get_db(), get_active_library_id(), status)
     if units:
         selected_unit = min(selected_unit, units[-1]["number"])
-    unit_words = unit_repository.fetch(get_db(), get_active_library_id(), selected_unit, status)
+    unit_words = (
+        unit_repository.search_words(
+            get_db(), get_active_library_id(), search_query
+        )
+        if search_mode
+        else unit_repository.fetch(
+            get_db(), get_active_library_id(), selected_unit, status
+        )
+    )
     selected_word = None
     selected_examples: list[dict[str, object]] = []
-    selected_definition = ""
+    selected_patterns: list[dict[str, object]] = []
+    selected_definitions: list[str] = []
     try:
         selected_word_id = int(request.args.get("word", "0"))
     except ValueError:
@@ -1110,22 +1433,62 @@ def render_workspace(mode: str):
         if candidate is not None and (status is None or candidate["status"] == status):
             selected_word = candidate
             selected_examples = example_candidates_for_word(candidate, include_tagged=True)
-            selected_definition = lookup_wiktionary_definition(
-                str(candidate["word"]), str(candidate["part_of_speech"])
-            ) or str(candidate["definition"] or "")
+            selected_patterns = pattern_candidates_for_word(candidate)
+            definition_records = lookup_wiktionary_definition_records(
+                str(candidate["word"]), str(candidate["part_of_speech"]), limit=None
+            )
+            if definition_records:
+                selected_definitions = [
+                    str(record["definition"]) for record in definition_records
+                ]
+                rank_numbers = {
+                    int(record["sense_rank"]): number
+                    for number, record in enumerate(definition_records, start=1)
+                }
+                definition_numbers = {
+                    str(record["raw_definition"]): number
+                    for number, record in enumerate(definition_records, start=1)
+                }
+                for example in selected_examples:
+                    if example.get("is_user"):
+                        continue
+                    number = None
+                    if example.get("definition"):
+                        number = definition_numbers.get(str(example["definition"]))
+                    sense_rank = example.get("sense_rank")
+                    if number is None and sense_rank is not None:
+                        number = rank_numbers.get(int(sense_rank))
+                    if number is not None:
+                        example["definition_number"] = number
+                for pattern in selected_patterns:
+                    number = None
+                    if pattern.get("definition"):
+                        number = definition_numbers.get(str(pattern["definition"]))
+                    sense_rank = pattern.get("sense_rank")
+                    if number is None and sense_rank is not None:
+                        number = rank_numbers.get(int(sense_rank))
+                    if number is not None:
+                        pattern["definition_number"] = number
+            else:
+                selected_definitions = definition_items(
+                    str(candidate["definition"] or ""), str(candidate["part_of_speech"])
+                )
     return render_template(
         "workspace.html",
         workspace_mode=mode,
         workspace_endpoint=endpoint,
         edit_mode=edit_mode,
         editor_panel=editor_panel,
+        search_mode=search_mode,
+        search_query=raw_search_query,
         page_title={"home": "待学", "learned": "复习", "wrong": "错词", "libraries": "词库"}[mode],
         units=units,
         selected_unit=selected_unit,
         unit_words=unit_words,
         selected_word=selected_word,
         selected_examples=selected_examples,
-        selected_definition=selected_definition,
+        selected_patterns=selected_patterns,
+        selected_definitions=selected_definitions,
         part_of_speech_options=PART_OF_SPEECH_OPTIONS,
         add_word_messages=session.pop("add_word_messages", []),
         workspace_add_draft=session.pop("workspace_add_draft", {}),
@@ -1213,7 +1576,10 @@ def add_library():
         return redirect(add_redirect)
 
     try:
-        cursor = get_db().execute("INSERT INTO libraries (name) VALUES (?)", (name,))
+        cursor = get_db().execute(
+            "INSERT INTO libraries (user_id, name) VALUES (?, ?)",
+            (current_user_id(), name),
+        )
         get_db().commit()
         session["active_library_id"] = int(cursor.lastrowid)
         clear_practice_session()
@@ -1222,6 +1588,118 @@ def add_library():
         flash("同名词库已经存在。", "error")
 
     return redirect(url_for("libraries", edit=1) if workspace_edit else url_for("index"))
+
+
+@app.post("/libraries/rename")
+def rename_library():
+    name = request.form.get("library_name", "").strip()
+    if not name:
+        flash("请输入词库名称。", "error")
+    elif len(name) > 80:
+        flash("词库名称不能超过 80 个字符。", "error")
+    else:
+        try:
+            library_repository.rename(get_db(), get_active_library_id(), name)
+            flash("词库名称已更新。", "success")
+        except sqlite3.IntegrityError:
+            get_db().rollback()
+            flash("同名词库已经存在。", "error")
+    return redirect(url_for("libraries", edit=1, panel="manage"))
+
+
+@app.post("/libraries/delete")
+def delete_library():
+    active_id = get_active_library_id()
+    remaining = [row for row in fetch_libraries() if int(row["id"]) != active_id]
+    if not remaining:
+        flash("至少需要保留一个词库。", "error")
+        return redirect(url_for("libraries", edit=1, panel="manage"))
+    library_repository.delete(get_db(), active_id)
+    session["active_library_id"] = int(remaining[0]["id"])
+    clear_practice_session()
+    flash("词库及其学习记录已删除。", "success")
+    return redirect(url_for("libraries", edit=1, panel="manage"))
+
+
+def _export_cell(value: object) -> str:
+    return str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+
+
+@app.get("/libraries/export")
+def export_library():
+    export_format = request.args.get("format", "csv").strip().casefold()
+    scope = request.args.get("scope", "library").strip().casefold()
+    if export_format not in {"txt", "csv"} or scope not in {"library", "unit"}:
+        abort(400)
+    try:
+        selected_unit = max(1, int(request.args.get("unit", "1")))
+    except ValueError:
+        abort(400)
+
+    library = get_active_library()
+    unit_number = selected_unit if scope == "unit" else None
+    rows = word_repository.fetch_for_export(
+        get_db(), int(library["id"]), unit_number
+    )
+    buffer = io.StringIO(newline="")
+    if export_format == "csv":
+        writer = csv.writer(buffer, lineterminator="\n")
+        writer.writerow([
+            "unit", "word", "part_of_speech", "meaning", "phonetic",
+            "definition", "example_sentence", "example_translation",
+            "status", "source_tags",
+        ])
+        for row in rows:
+            writer.writerow([
+                row["unit_number"], row["word"], row["part_of_speech"],
+                row["meaning"], row["phonetic"], row["definition"],
+                row["exported_example_sentence"],
+                row["exported_example_translation"], row["status"],
+                row["source_tags"],
+            ])
+    else:
+        buffer.write(f"# TypEng · {_export_cell(library['name'])}\n")
+        current_unit: int | None = None
+        for row in rows:
+            row_unit = int(row["unit_number"] or 0)
+            if row_unit != current_unit:
+                current_unit = row_unit
+                buffer.write(f"# Unit {row_unit}\n")
+            cells = [
+                row["word"], row["part_of_speech"], row["meaning"],
+                row["exported_example_sentence"],
+                row["exported_example_translation"],
+            ]
+            # Tabs/newlines would change the importer's column structure.
+            buffer.write("\t".join(
+                re.sub(r"\s+", " ", _export_cell(cell)).strip()
+                for cell in cells
+            ).rstrip("\t") + "\n")
+
+    payload = io.BytesIO(buffer.getvalue().encode("utf-8-sig"))
+    safe_name = re.sub(
+        r"[^\w.-]+", "-", str(library["name"]), flags=re.UNICODE
+    ).strip("-.")
+    safe_name = safe_name or f"library-{int(library['id'])}"
+    scope_suffix = f"unit-{selected_unit}" if scope == "unit" else "all"
+    return send_file(
+        payload,
+        mimetype=(
+            "text/csv; charset=utf-8"
+            if export_format == "csv"
+            else "text/plain; charset=utf-8"
+        ),
+        as_attachment=True,
+        download_name=f"{safe_name}-{scope_suffix}.{export_format}",
+        max_age=0,
+    )
+
+
+@app.post("/libraries/units/add")
+def add_library_unit():
+    unit_number = unit_repository.create(get_db(), get_active_library_id())
+    flash(f"已新建单元 {unit_number}。", "success")
+    return redirect(url_for("libraries", edit=1, unit=unit_number, panel="add"))
 
 
 @app.post("/review/settings")
@@ -1476,7 +1954,9 @@ def unique_library_name(base_name: str) -> str:
     """Return base_name, or base_name (2), (3), ... if it is already taken."""
     existing = {
         str(row["name"])
-        for row in get_db().execute("SELECT name FROM libraries").fetchall()
+        for row in get_db().execute(
+            "SELECT name FROM libraries WHERE user_id IS ?", (current_user_id(),)
+        ).fetchall()
     }
     if base_name not in existing:
         return base_name
@@ -1498,7 +1978,8 @@ def create_ecdict_preset():
     # an explicit "confirm" flag to prevent an accidental rebuild that would
     # wipe the user's edits and deletions.
     existing_row = get_db().execute(
-        "SELECT id FROM libraries WHERE name = ?", (library_name,)
+        "SELECT id FROM libraries WHERE name = ? AND user_id IS ?",
+        (library_name, current_user_id()),
     ).fetchone()
     if existing_row and request.form.get("confirm") != "1":
         word_count = get_db().execute(
@@ -1552,18 +2033,9 @@ def create_preview():
     prompt_mode = prompt_mode_from_form(allow_cloze=True)
     with_cloze = with_cloze_from_form(allow_cloze=True)
 
-    rows = get_db().execute(
-        """
-        SELECT id, word, example_sentence FROM words
-        WHERE library_id = ? AND status = ?
-        ORDER BY
-            CASE WHEN frequency IS NULL THEN 1 ELSE 0 END ASC,
-            frequency ASC,
-            id ASC
-        LIMIT ?
-        """,
-        (get_active_library_id(), STATUS_NEW, requested_count),
-    ).fetchall()
+    rows = unit_repository.fetch_batch(
+        get_db(), get_active_library_id(), STATUS_NEW, requested_count
+    )
     ids = [int(row["id"]) for row in rows]
     if not ids:
         flash("当前没有可学习的新词，请先导入词汇或练习错词。", "error")
@@ -1733,11 +2205,42 @@ def practice():
         cloze_text=cloze_text,
         cloze_truncated=bool(full_cloze_text and cloze_text != full_cloze_text),
         cloze_answer=cloze_answer(word["example_sentence"], word["word"]),
+        cloze_feedback=session.get("cloze_feedback_context"),
         missed_count=len(session.get("missed_ids", [])),
         practice_round=int(session.get("practice_round", 1)),
         hide_global_stats=True,
         **base_context(),
     )
+
+
+def stage_cloze_feedback(
+    word: sqlite3.Row | dict[str, object],
+    prompt_mode: str,
+    is_correct: bool,
+    result: dict[str, object],
+) -> bool:
+    """Hold a Cloze result long enough to collect optional material feedback."""
+    sentence = str(word.get("example_sentence") or "") if isinstance(word, dict) else str(word["example_sentence"] or "")
+    if prompt_mode != PROMPT_CLOZE or not sentence:
+        session.pop("cloze_feedback_context", None)
+        return False
+    value = lambda key, default=None: word.get(key, default) if isinstance(word, dict) else word[key]
+    session["cloze_feedback_context"] = {
+        "token": secrets.token_urlsafe(18),
+        "word_id": int(value("id")),
+        "word": str(value("word")),
+        "part_of_speech": str(value("part_of_speech")),
+        "sentence": sentence,
+        "sentence_hash": hashlib.sha256(sentence.encode("utf-8")).hexdigest(),
+        "material_type": str(value("cloze_material_type", "example") or "example"),
+        "material_source": str(value("example_source", "") or "") or None,
+        "answer_correct": bool(is_correct),
+        "practice_mode": str(session.get("practice_mode", "normal")),
+        "submitted_rating": None,
+    }
+    session["awaiting_next"] = True
+    session["last_result"] = result
+    return True
 
 
 @app.post("/practice/submit")
@@ -1772,6 +2275,9 @@ def submit_answer():
     if bool(session.get("cloze_followup_active", False)):
         db.commit()
         if is_correct:
+            staged_result = form_hint_feedback or answer_feedback(word, answer, True)
+            if stage_cloze_feedback(word, prompt_mode, True, staged_result):
+                return redirect(url_for("practice"))
             if form_hint_feedback:
                 session["awaiting_next"] = True
                 session["last_result"] = form_hint_feedback
@@ -1791,8 +2297,10 @@ def submit_answer():
             missed_ids.append(int(word["id"]))
         session["missed_ids"] = missed_ids
 
-        session["awaiting_next"] = True
-        session["last_result"] = answer_feedback(word, answer, False)
+        staged_result = answer_feedback(word, answer, False)
+        if not stage_cloze_feedback(word, prompt_mode, False, staged_result):
+            session["awaiting_next"] = True
+            session["last_result"] = staged_result
         return redirect(url_for("practice"))
 
     if mode == "wrong":
@@ -1841,6 +2349,9 @@ def submit_answer():
         if is_correct:
             complete_review(int(word["id"]))
             db.commit()
+            staged_result = form_hint_feedback or answer_feedback(word, answer, True)
+            if stage_cloze_feedback(word, prompt_mode, True, staged_result):
+                return redirect(url_for("practice"))
             if form_hint_feedback:
                 session["awaiting_next"] = True
                 session["last_result"] = form_hint_feedback
@@ -1860,8 +2371,10 @@ def submit_answer():
             missed_ids.append(int(word["id"]))
         session["missed_ids"] = missed_ids
 
-        session["awaiting_next"] = True
-        session["last_result"] = answer_feedback(word, answer, False)
+        staged_result = answer_feedback(word, answer, False)
+        if not stage_cloze_feedback(word, prompt_mode, False, staged_result):
+            session["awaiting_next"] = True
+            session["last_result"] = staged_result
         return redirect(url_for("practice"))
 
     if mode == "normal":
@@ -1878,6 +2391,9 @@ def submit_answer():
                 (STATUS_LEARNED, next_review_date(0), word["id"], get_active_library_id()),
             )
             db.commit()
+            staged_result = form_hint_feedback or answer_feedback(word, answer, True)
+            if stage_cloze_feedback(word, prompt_mode, True, staged_result):
+                return redirect(url_for("practice"))
             if form_hint_feedback:
                 session["awaiting_next"] = True
                 session["last_result"] = form_hint_feedback
@@ -1897,12 +2413,54 @@ def submit_answer():
             missed_ids.append(int(word["id"]))
         session["missed_ids"] = missed_ids
 
-        session["awaiting_next"] = True
-        session["last_result"] = answer_feedback(word, answer, False)
+        staged_result = answer_feedback(word, answer, False)
+        if not stage_cloze_feedback(word, prompt_mode, False, staged_result):
+            session["awaiting_next"] = True
+            session["last_result"] = staged_result
         return redirect(url_for("practice"))
 
-    session["awaiting_next"] = True
-    session["last_result"] = form_hint_feedback or answer_feedback(word, answer, is_correct)
+    staged_result = form_hint_feedback or answer_feedback(word, answer, is_correct)
+    if not stage_cloze_feedback(word, prompt_mode, is_correct, staged_result):
+        session["awaiting_next"] = True
+        session["last_result"] = staged_result
+    return redirect(url_for("practice"))
+
+
+@app.post("/practice/feedback")
+def submit_cloze_feedback():
+    context = session.get("cloze_feedback_context") or {}
+    supplied_token = request.form.get("feedback_token", "")
+    rating = request.form.get("rating", "")
+    if (
+        not session.get("awaiting_next")
+        or not supplied_token
+        or not secrets.compare_digest(supplied_token, str(context.get("token", "")))
+        or rating not in feedback_repository.RATINGS
+    ):
+        abort(400)
+    word = fetch_word(int(context["word_id"]))
+    if word is None:
+        abort(404)
+    feedback_repository.save(
+        get_db(),
+        feedback_token=supplied_token,
+        library_id=get_active_library_id(),
+        user_id=current_user_id(),
+        word_id=int(context["word_id"]),
+        word=str(context["word"]),
+        part_of_speech=str(context["part_of_speech"]),
+        sentence=str(context["sentence"]),
+        sentence_hash=str(context["sentence_hash"]),
+        material_type=str(context["material_type"]),
+        material_source=context.get("material_source"),
+        rating=rating,
+        answer_correct=bool(context["answer_correct"]),
+        practice_mode=str(context["practice_mode"]),
+    )
+    context["submitted_rating"] = rating
+    session["cloze_feedback_context"] = context
+    if request.headers.get("X-Requested-With") == "fetch":
+        return jsonify({"saved": True, "rating": rating})
     return redirect(url_for("practice"))
 
 
@@ -1930,6 +2488,7 @@ def next_word():
     session["practice_index"] = index + 1
     session["awaiting_next"] = False
     session["last_result"] = None
+    session.pop("cloze_feedback_context", None)
     return redirect(url_for("practice"))
 
 
@@ -2094,6 +2653,89 @@ def edit_word(word_id: int):
     return redirect(request.referrer or url_for("index"))
 
 
+def pattern_form_values(word: sqlite3.Row) -> tuple[str, str | None, int | None, str | None, bool] | None:
+    expression = re.sub(r"\s+", " ", request.form.get("expression", "")).strip()
+    usage_label = request.form.get("usage_label", "").strip() or None
+    if not expression:
+        flash("请输入固定搭配。", "error")
+        return None
+    if len(expression) > 140 or not 2 <= english_word_count(expression) <= 12:
+        flash("固定搭配应包含 2—12 个英文单词，且不超过 140 个字符。", "error")
+        return None
+    if not cloze_prompt(expression, str(word["word"])):
+        flash("固定搭配必须包含当前单词或它的合法词形。", "error")
+        return None
+    if usage_label and len(usage_label) > 60:
+        flash("用法标签不能超过 60 个字符。", "error")
+        return None
+    definition = None
+    sense_rank = None
+    raw_number = request.form.get("definition_number", "").strip()
+    if raw_number:
+        try:
+            number = int(raw_number)
+        except ValueError:
+            flash("请选择有效的英文释义。", "error")
+            return None
+        records = lookup_wiktionary_definition_records(
+            str(word["word"]), str(word["part_of_speech"]), limit=None
+        )
+        if number < 1 or number > len(records):
+            flash("所选英文释义已经变化，请重新选择。", "error")
+            return None
+        record = records[number - 1]
+        definition = str(record["raw_definition"])
+        sense_rank = int(record["sense_rank"])
+    enabled = request.form.get("enabled_for_cloze") == "on"
+    return expression, definition, sense_rank, usage_label, enabled
+
+
+@app.post("/words/<int:word_id>/patterns/add")
+def add_word_pattern(word_id: int):
+    word = fetch_word(word_id)
+    if word is None:
+        flash("没有找到该词条。", "error")
+        return redirect(url_for("libraries", edit=1))
+    values = pattern_form_values(word)
+    if values is not None:
+        try:
+            pattern_repository.add_user_pattern(get_db(), word_id, *values)
+            flash("固定搭配已添加。", "success")
+        except sqlite3.IntegrityError:
+            get_db().rollback()
+            flash("这条固定搭配已经存在。", "error")
+    return redirect(request.referrer or url_for("libraries", edit=1, word=word_id))
+
+
+@app.post("/words/<int:word_id>/patterns/<int:pattern_id>/edit")
+def edit_word_pattern(word_id: int, pattern_id: int):
+    word = fetch_word(word_id)
+    if word is None or pattern_repository.fetch_user_pattern(get_db(), pattern_id, word_id) is None:
+        flash("没有找到该固定搭配。", "error")
+        return redirect(url_for("libraries", edit=1))
+    values = pattern_form_values(word)
+    if values is not None:
+        try:
+            pattern_repository.update_user_pattern(get_db(), pattern_id, word_id, *values)
+            flash("固定搭配已更新。", "success")
+        except sqlite3.IntegrityError:
+            get_db().rollback()
+            flash("这条固定搭配已经存在。", "error")
+    return redirect(request.referrer or url_for("libraries", edit=1, word=word_id))
+
+
+@app.post("/words/<int:word_id>/patterns/<int:pattern_id>/delete")
+def delete_word_pattern(word_id: int, pattern_id: int):
+    word = fetch_word(word_id)
+    if word is None or not pattern_repository.delete_user_pattern(
+        get_db(), pattern_id, word_id
+    ):
+        flash("没有找到该固定搭配。", "error")
+    else:
+        flash("固定搭配已删除。", "success")
+    return redirect(request.referrer or url_for("libraries", edit=1, word=word_id))
+
+
 @app.post("/words/add")
 def add_word():
     workspace_edit = request.form.get("workspace") == "1"
@@ -2181,8 +2823,33 @@ def add_word():
             session["add_word_messages"] = [("error", message)]
         return redirect(add_redirect)
 
+    db = get_db()
+    existing_keys = {
+        (str(row["word"]), str(row["part_of_speech"]))
+        for row in db.execute(
+            "SELECT word, part_of_speech FROM words WHERE library_id = ?",
+            (get_active_library_id(),),
+        ).fetchall()
+    }
     enriched = enrich_entries_from_ecdict(entries)
     inserted, updated, skipped = import_entries(entries, update_existing=False)
+    if workspace_edit and inserted:
+        inserted_ids = [
+            int(row["id"])
+            for entry in entries
+            if (str(entry["word"]), str(entry["part_of_speech"])) not in existing_keys
+            for row in db.execute(
+                """
+                SELECT id FROM words
+                WHERE library_id = ? AND word = ? AND part_of_speech = ?
+                """,
+                (get_active_library_id(), entry["word"], entry["part_of_speech"]),
+            ).fetchall()
+        ]
+        unit_repository.place_words(
+            db, get_active_library_id(), inserted_ids, workspace_unit
+        )
+        db.commit()
     suffix = f" ECDICT 已补充 {enriched} 个词条。" if enriched else ""
     messages = []
     if inserted:
@@ -2304,7 +2971,7 @@ def save_page_edits():
 def delete_word(word_id: int):
     deleted = delete_word_ids({word_id}, get_active_library_id())
     if deleted:
-        flash("词条已删除，后续单词已自动补位。", "success")
+        flash("词条已删除；本单元的其余单词保持原位。", "success")
     else:
         flash("当前词库中没有找到该词条。", "error")
     if request.form.get("next"):
@@ -2336,7 +3003,7 @@ def bulk_delete_words():
         )
 
     deleted = delete_word_ids(selected_ids, get_active_library_id())
-    flash(f"已删除 {deleted} 个词条，后续单词已自动补位。", "success")
+    flash(f"已删除 {deleted} 个词条；只有清空的单元会自动折叠。", "success")
     return redirect(
         url_for("libraries", edit=1, unit=workspace_unit)
         if workspace_edit else url_for("index", **redirect_args)

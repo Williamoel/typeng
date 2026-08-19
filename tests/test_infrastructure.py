@@ -133,7 +133,7 @@ def test_exam_policy_validates_pos_and_only_removes_confirmed_basic_words(tmp_pa
     assert stats["removed_wiktionary_pos"] == 1
     assert stats["removed_missing_definition"] == 1
     assert stats["kept_unclassified"] == 1
-    assert kept[0]["definition"] == "[美式 · 俚语] little known; abstruse"
+    assert kept[0]["definition"] == "[US · slang] little known; abstruse"
     db.close()
 
 

@@ -85,3 +85,40 @@ BLOCKED_EXAMPLE_WORDS = {
     "asshole",
     "damn",
 }
+
+# Form/spelling notes are not lexical meanings suitable for learners.  For
+# example, Wiktionary tags air = "are" as a pronunciation spelling.
+NON_LEXICAL_WIKTIONARY_TAGS = {
+    "form-of",
+    "alt-of",
+    "pronunciation-spelling",
+}
+BLOCKED_WIKTIONARY_DEFINITION_TAGS = {
+    "archaic",
+    "obsolete",
+    "dated",
+    "rare",
+    *NON_LEXICAL_WIKTIONARY_TAGS,
+}
+
+WIKTIONARY_HIDDEN_DISPLAY_TAGS = {
+    "transitive",
+    "intransitive",
+    "ambitransitive",
+    "ditransitive",
+    "countable",
+    "uncountable",
+    "not-comparable",
+    "comparable",
+    "singular",
+    "plural",
+    "attributive",
+    *NON_LEXICAL_WIKTIONARY_TAGS,
+}
+
+# Audited corrections for incorrect bilingual meanings. These do not invent
+# English senses; the replacement must correspond to the indexed Wiktionary
+# definition for the same word and POS.
+ECDICT_MEANING_CORRECTIONS = {
+    ("shock", "adj"): "令人震惊的, 突如其来的",
+}

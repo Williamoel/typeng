@@ -5,6 +5,15 @@
 TypEng can use several third-party dictionary resources. Each keeps its own
 license; keep the original license notices with any packaged release.
 
+## Interface font
+
+The web interface bundles the Simplified Chinese subset of Noto Sans SC so its
+Chinese typography remains consistent on systems without CJK fonts.
+
+- Source: https://fonts.google.com/noto/specimen/Noto+Sans+SC
+- Package: `@fontsource/noto-sans-sc`
+- License: SIL Open Font License 1.1 (included in `static/fonts/OFL.txt`)
+
 ## ECDICT
 
 TypEng can import `ecdict.csv` from ECDICT to generate tagged vocabulary libraries.
@@ -68,6 +77,14 @@ A step-by-step Chinese install guide is shipped with releases as
 # 数据来源
 
 TypEng 可以使用多个第三方词典资源。每个资源都保留各自的许可证；在任何打包发行版中都请一并保留原始许可证声明。
+
+## 界面字体
+
+网站界面内置 Noto Sans SC 简体中文子集，使未安装中文字体的系统也能保持一致排版。
+
+- 来源：https://fonts.google.com/noto/specimen/Noto+Sans+SC
+- 打包来源：`@fontsource/noto-sans-sc`
+- 许可证：SIL Open Font License 1.1（全文见 `static/fonts/OFL.txt`）
 
 ## ECDICT
 

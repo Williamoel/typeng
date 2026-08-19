@@ -130,6 +130,20 @@ def test_long_example_not_blocked_by_length():
     assert app.usable_wiktionary_example(long_sentence, "basement")
 
 
+def test_example_splitter_preserves_personal_name_initials():
+    quotation = (
+        'It should be noted that there is now no intelligentsia that is not in some sense "Left". '
+        'Perhaps the last right-wing intellectual was T. E. Lawrence. '
+        'Since about 1930 everyone describable as an intellectual has lived in discontent.'
+    )
+
+    selected = app.extract_example_sentence(
+        quotation, "intellectual", [[117, 129]]
+    )
+
+    assert selected == "… Perhaps the last right-wing intellectual was T. E. Lawrence. …"
+
+
 def test_cloze_truncation_leaves_marker_centered():
     """Truncation must keep the ____ marker visible and not lose it."""
     long_prompt = "The " + "very " * 50 + "quick brown ____ fox " + "jumps " * 30 + "over the lazy dog."
@@ -189,3 +203,155 @@ def test_wiktionary_definition_is_scoped_to_requested_pos(monkeypatch, tmp_path)
         definition = app.lookup_wiktionary_definition("way", "adv")
         assert definition == "at a great distance"
         assert "route" not in definition
+
+
+def test_wiktionary_omits_pronunciation_spelling_senses(monkeypatch, tmp_path):
+    jsonl_path = tmp_path / "air.jsonl"
+    lexical = _minimal_entry("air", "verb", ["We aired the room before lunch."])
+    lexical["senses"][0]["glosses"] = ["To expose something to the air."]
+    spelling = _minimal_entry("air", "verb", ["Where air you going?"])
+    spelling["senses"][0]["glosses"] = ["Pronunciation spelling of are."]
+    spelling["senses"][0]["tags"] = ["alt-of", "pronunciation-spelling"]
+    _write_jsonl(jsonl_path, [lexical, spelling])
+    monkeypatch.setattr(app, "WIKTIONARY_JSONL_CANDIDATES", [jsonl_path])
+
+    with app.app.app_context():
+        app.init_db()
+        db = app.get_db()
+        db.execute("DROP TABLE IF EXISTS wiktionary_examples")
+        db.execute("DROP TABLE IF EXISTS wiktionary_definitions")
+        db.execute("DROP TABLE IF EXISTS wiktionary_indexed_words")
+        db.execute("DELETE FROM metadata WHERE key = 'wiktionary_lookup_signature'")
+        db.commit()
+        app.ensure_wiktionary_lookup_index({"air"})
+
+        definitions = app.lookup_wiktionary_definition_records("air", "v", limit=None)
+        examples = app.ranked_wiktionary_example_candidates("air", "v", limit=None)
+
+    assert [item["raw_definition"] for item in definitions] == [
+        "To expose something to the air."
+    ]
+    assert [row["example_sentence"] for row in examples] == [
+        "We aired the room before lunch."
+    ]
+
+
+def test_wiktionary_uses_leaf_gloss_and_prefers_complete_example(monkeypatch, tmp_path):
+    jsonl_path = tmp_path / "account.jsonl"
+    entry = _minimal_entry("account", "verb", [])
+    entry["senses"] = [
+        {
+            "glosses": ["To provide explanation.", "To give a satisfactory reason for; to explain."],
+            "tags": ["intransitive"],
+            "examples": [
+                {"text": "Idleness accounts for poverty.", "type": "example"},
+                {
+                    "text": "Earlier discussion. " + "context " * 35 + "This may account for the result. " + "later " * 35,
+                    "type": "quotation",
+                },
+            ],
+        }
+    ]
+    _write_jsonl(jsonl_path, [entry])
+    monkeypatch.setattr(app, "WIKTIONARY_JSONL_CANDIDATES", [jsonl_path])
+
+    with app.app.app_context():
+        app.init_db()
+        db = app.get_db()
+        db.execute("DROP TABLE IF EXISTS wiktionary_examples")
+        db.execute("DROP TABLE IF EXISTS wiktionary_definitions")
+        db.execute("DROP TABLE IF EXISTS wiktionary_indexed_words")
+        db.execute("DELETE FROM metadata WHERE key = 'wiktionary_lookup_signature'")
+        db.commit()
+        app.ensure_wiktionary_lookup_index({"account"})
+
+        definitions = app.lookup_wiktionary_definition_records("account", "v", limit=None)
+        examples = app.ranked_wiktionary_example_candidates("account", "v", limit=None)
+
+    assert [item["raw_definition"] for item in definitions] == [
+        "To give a satisfactory reason for; to explain."
+    ]
+    assert [row["example_sentence"] for row in examples] == [
+        "Idleness accounts for poverty."
+    ]
+
+
+def test_wiktionary_recovers_usage_labels_from_raw_gloss(monkeypatch, tmp_path):
+    jsonl_path = tmp_path / "jury.jsonl"
+    entry = _minimal_entry("jury", "adj", ["They raised a jury mast after the storm."])
+    entry["senses"][0]["glosses"] = [
+        "For temporary use; applied to a temporary contrivance."
+    ]
+    entry["senses"][0]["tags"] = ["not-comparable"]
+    entry["senses"][0]["raw_glosses"] = [
+        "(nautical, in compounds) For temporary use; applied to a temporary contrivance."
+    ]
+    _write_jsonl(jsonl_path, [entry])
+    monkeypatch.setattr(app, "WIKTIONARY_JSONL_CANDIDATES", [jsonl_path])
+
+    with app.app.app_context():
+        app.init_db()
+        db = app.get_db()
+        db.execute("DROP TABLE IF EXISTS wiktionary_examples")
+        db.execute("DROP TABLE IF EXISTS wiktionary_definitions")
+        db.execute("DROP TABLE IF EXISTS wiktionary_indexed_words")
+        db.execute("DELETE FROM metadata WHERE key = 'wiktionary_lookup_signature'")
+        db.commit()
+        app.ensure_wiktionary_lookup_index({"jury"})
+        definitions = app.lookup_wiktionary_definition_records("jury", "adj")
+
+    assert definitions[0]["definition"].startswith("[in compounds · nautical]")
+
+
+def test_fossil_word_short_examples_become_fixed_patterns(monkeypatch, tmp_path):
+    jsonl_path = tmp_path / "fossil.jsonl"
+    entry = _minimal_entry(
+        "come", "verb",
+        ["come true", "come clean", "This complete sentence should not become a pattern."],
+    )
+    entry["senses"][0]["raw_glosses"] = [
+        "(copulative, fossil word) To become, often in set phrases."
+    ]
+    entry["senses"][0]["tags"] = ["copulative"]
+    _write_jsonl(jsonl_path, [entry])
+    monkeypatch.setattr(app, "WIKTIONARY_JSONL_CANDIDATES", [jsonl_path])
+    monkeypatch.setattr(app, "WIKTIONARY_USAGE_PATTERNS_PATH", tmp_path / "missing.tsv")
+
+    with app.app.app_context():
+        app.init_db()
+        db = app.get_db()
+        for table in (
+            "wiktionary_examples", "wiktionary_definitions",
+            "wiktionary_indexed_words", "wiktionary_headwords", "wiktionary_patterns",
+        ):
+            db.execute(f"DROP TABLE IF EXISTS {table}")
+        db.execute("DELETE FROM metadata WHERE key = 'wiktionary_lookup_signature'")
+        db.commit()
+        app.ensure_wiktionary_lookup_index({"come"})
+        patterns = app.lookup_wiktionary_patterns("come", "v")
+
+    assert [item["expression"] for item in patterns] == ["come true", "come clean"]
+    assert all(item["usage_label"] == "fossil word" for item in patterns)
+
+
+def test_rare_definition_and_its_example_are_filtered_together(monkeypatch, tmp_path):
+    jsonl_path = tmp_path / "passage.jsonl"
+    entry = _minimal_entry("passage", "verb", ["They passaged to America in 1902."])
+    entry["senses"][0]["glosses"] = ["To make a passage, especially by sea; to cross."]
+    entry["senses"][0]["tags"] = ["rare"]
+    _write_jsonl(jsonl_path, [entry])
+    monkeypatch.setattr(app, "WIKTIONARY_JSONL_CANDIDATES", [jsonl_path])
+
+    with app.app.app_context():
+        app.init_db()
+        db = app.get_db()
+        db.execute("DROP TABLE IF EXISTS wiktionary_examples")
+        db.execute("DROP TABLE IF EXISTS wiktionary_definitions")
+        db.execute("DROP TABLE IF EXISTS wiktionary_indexed_words")
+        db.execute("DROP TABLE IF EXISTS wiktionary_headwords")
+        db.execute("DELETE FROM metadata WHERE key = 'wiktionary_lookup_signature'")
+        db.commit()
+        app.ensure_wiktionary_lookup_index({"passage"})
+
+        assert app.lookup_wiktionary_definition_records("passage", "v") == []
+        assert app.ranked_wiktionary_example_candidates("passage", "v") == []

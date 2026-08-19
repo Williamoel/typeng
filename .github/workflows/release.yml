@@ -198,10 +198,15 @@ jobs:
       - name: Create GitHub Release and attach packages
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*.zip
           generate_release_notes: true
           body: |
-            Desktop packages built automatically by GitHub Actions.
+            TypEng v0.3 adds an account-enabled web deployment, per-user data
+            isolation, a black-rail workspace, stable custom units, fixed
+            expressions, improved Wiktionary cleanup, library export, and
+            optional learner feedback for Cloze examples.
+
+            The desktop packages remain local-first and require no account.
+            They are built automatically by GitHub Actions.
 
             **Windows**: download the `windows-x64` zip, extract it, and
             double-click `typeng.exe`. The browser opens automatically.
@@ -215,4 +220,9 @@ jobs:
             `./typeng`.
 
             A preprocessed lexicon is included; users do not need to download
-            raw dictionary files. See `SOURCES.md` for data provenance.
+            raw dictionary files. The standalone `typeng-lexicon.sqlite3`
+            asset is also used by hosted deployments. See `SOURCES.md` for
+            data provenance.
+          files: |
+            artifacts/*.zip
+            artifacts/typeng-lexicon.sqlite3

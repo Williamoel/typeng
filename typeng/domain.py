@@ -13,7 +13,7 @@ from .chinese_fallback import TRADITIONAL_TO_SIMPLIFIED
 from .constants import *  # shared closed set of domain constants
 from .parts import canonical_part, compatible_parts, lexical_part
 
-__all__ = "display_pos_label definition_items definition_lines normalize_user_pos merge_text_values next_review_date spelling_variants cloze_forms cloze_inflections cloze_match_pattern cloze_answer cloze_prompt truncate_cloze_prompt valid_example_sentence english_word_count contains_blocked_example_word example_target_position_penalty normalize_answer answer_matches answer_feedback cloze_form_hint_feedback normalize_part_group matched_form_in_sentence sentence_tokens first_match_context token_after_adverbs high_ambiguity_pos_allowed part_of_speech_penalty sentence_quality_score wiktionary_part_group wiktionary_lookup_groups normalize_wiktionary_pos clean_wiktionary_example_text contains_archaic_english extract_example_sentence usable_wiktionary_example wiktionary_example_rank example_note_from_tags wiktionary_usage_label simplify_chinese parse_word_file normalize_entry parse_csv parse_text_lines split_ecdict_tags clean_ecdict_text format_ecdict_definition normalize_ecdict_pos infer_pos_from_ecdict_definition infer_pos_from_ecdict_exchange infer_pos_from_word_shape infer_ecdict_fallback_pos split_ecdict_translation normalize_ecdict_frequency parse_ecdict_csv".split()
+__all__ = "display_pos_label definition_items definition_lines normalize_user_pos merge_text_values next_review_date spelling_variants cloze_forms cloze_inflections cloze_match_pattern cloze_answer cloze_prompt truncate_cloze_prompt valid_example_sentence english_word_count contains_blocked_example_word example_target_position_penalty normalize_answer answer_matches answer_feedback cloze_form_hint_feedback normalize_part_group matched_form_in_sentence sentence_tokens first_match_context token_after_adverbs high_ambiguity_pos_allowed part_of_speech_penalty sentence_quality_score wiktionary_part_group wiktionary_lookup_groups normalize_wiktionary_pos clean_wiktionary_example_text contains_archaic_english extract_example_sentence usable_wiktionary_example wiktionary_example_rank example_note_from_tags wiktionary_usage_label wiktionary_definition_display simplify_chinese parse_word_file normalize_entry parse_csv parse_text_lines split_ecdict_tags clean_ecdict_text format_ecdict_definition normalize_ecdict_pos infer_pos_from_ecdict_definition infer_pos_from_ecdict_exchange infer_pos_from_word_shape infer_ecdict_fallback_pos split_ecdict_translation normalize_ecdict_frequency parse_ecdict_csv".split()
 
 try:
     from opencc import OpenCC
@@ -37,20 +37,6 @@ NOTABLE_EXAMPLE_TAGS = {
     "rare": "rare usage",
 }
 
-WIKTIONARY_USAGE_LABELS = (
-    ("us", "美式"),
-    ("uk", "英式"),
-    ("britain", "英式"),
-    ("british", "英式"),
-    ("canada", "加拿大"),
-    ("australia", "澳大利亚"),
-    ("informal", "非正式"),
-    ("colloquial", "非正式"),
-    ("slang", "俚语"),
-    ("figurative", "比喻"),
-    ("figuratively", "比喻"),
-)
-
 ECDICT_MORPHOLOGY_NOTE_RE = re.compile(
     r"(?:过去式|过去分词|现在分词|第三人称单数|比较级|最高级|复数形式|的复数|原形)"
 )
@@ -58,17 +44,45 @@ ECDICT_UNATTACHED_DOMAIN_RE = re.compile(r"^\[[^\]]{1,12}\]\s*")
 
 
 def wiktionary_usage_label(raw_tags: str) -> str:
-    """Return a concise Chinese register/region label for Wiktionary tags."""
-    tags = {
+    """Return Wiktionary's usage/domain labels without translating them."""
+    tags = [
         tag.strip().casefold()
         for tag in re.split(r"[,;|]", raw_tags or "")
         if tag.strip()
-    }
+    ]
     labels: list[str] = []
-    for tag, label in WIKTIONARY_USAGE_LABELS:
-        if tag in tags and label not in labels:
+    for tag in tags:
+        if tag in WIKTIONARY_HIDDEN_DISPLAY_TAGS:
+            continue
+        label = {"us": "US", "uk": "UK"}.get(tag, tag.replace("-", " "))
+        if label not in labels:
             labels.append(label)
-    return " · ".join(labels)
+    # Kaikki may expose one qualifier in three equivalent forms, e.g.
+    # ``often``, ``with-down`` and the raw-gloss label ``often with down``.
+    # Prefer the most informative combined label instead of displaying all 3.
+    informative: list[str] = []
+    token_sets = [set(label.casefold().split()) for label in labels]
+    for index, label in enumerate(labels):
+        tokens = token_sets[index]
+        if any(tokens < other for other_index, other in enumerate(token_sets) if other_index != index):
+            continue
+        informative.append(label)
+    return " · ".join(informative)
+
+
+def wiktionary_definition_display(definition: str) -> str:
+    """Repair lossy plain-text conversions of a few mathematical formulas."""
+    value = definition.replace("\n", "; ").strip()
+    permanent_formula = re.fullmatch(
+        r"Given an n×n matrix a_ij,, the sum over all permutations π, of ∏ᵢ₌₁ⁿa_iπ\(i\)\.",
+        value,
+    )
+    if permanent_formula:
+        return (
+            "Given an n × n matrix A = (a(i, j)), the sum over all "
+            "permutations π of the product from i = 1 to n of a(i, π(i))."
+        )
+    return value
 
 
 def display_pos_label(part_of_speech: str | None) -> str:
@@ -760,6 +774,11 @@ def contains_archaic_english(text: str) -> bool:
     without an ``archaic`` tag. This small, conservative text gate catches the
     most visible pronouns, auxiliaries, and productive ``-eth`` verb forms.
     """
+    # A long s is not a rendering failure: it is historical typography copied
+    # from early printed sources.  Such quotations are unsuitable as modern
+    # learner examples even when Wiktionary does not tag the sense archaic.
+    if "ſ" in text:
+        return True
     tokens = re.findall(r"[A-Za-z]+", text)
     lowered = {token.lower() for token in tokens}
     if lowered & ARCHAIC_EXAMPLE_TOKENS:
@@ -776,7 +795,11 @@ def contains_archaic_english(text: str) -> bool:
     return bool(re.search(r"(?:^|\s)['’]tis(?:\s|$)", text, re.IGNORECASE))
 
 
-def extract_example_sentence(text: str, word: str) -> str:
+def extract_example_sentence(
+    text: str,
+    word: str,
+    bold_text_offsets: object | None = None,
+) -> str:
     """Pick the single best sentence containing the target word.
 
     Wiktionary quotations are often multi-sentence passages (well over the
@@ -794,25 +817,104 @@ def extract_example_sentence(text: str, word: str) -> str:
     if pattern is None:
         return cleaned
 
-    # Split into sentences on ., !, ? followed by whitespace. A perfect
-    # tokenizer is unnecessary for choosing a cloze sentence.
-    parts = re.split(r"(?<=[.!?])\s+", cleaned)
-    if len(parts) <= 1:
-        return cleaned
+    # Do not treat the period in common titles/abbreviations as a sentence
+    # boundary (the old splitter turned "Ms. Pinal" into "Pinal) ...").
+    period_marker = "\uE000"
+    protected = re.sub(
+        r"\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|vs|etc)\.",
+        lambda match: match.group(0).replace(".", period_marker),
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    # Preserve initials in personal names. Without this, a quotation such as
+    # ``T. E. Lawrence`` is split after ``T.`` and displayed as ``T. …``.
+    protected = re.sub(
+        r"\b[A-Z]\.(?=\s+(?:[A-Z]\.\s+)*[A-Z][a-z])",
+        lambda match: match.group(0).replace(".", period_marker),
+        protected,
+    )
+    parts = [
+        part.replace(period_marker, ".")
+        for part in re.split(r"(?<=[.!?])\s+", protected)
+    ]
 
-    matching = [part.strip() for part in parts if pattern.search(part)]
-    if not matching:
+    highlighted = ""
+    selected = ""
+
+    # Kaikki preserves the offsets of the form highlighted by Wiktionary.
+    # Prefer that evidence over a bare-headword search: an inflected form may
+    # occur in one line while the headword happens to occur in another.
+    if isinstance(bold_text_offsets, list):
+        for offsets in bold_text_offsets:
+            if not (
+                isinstance(offsets, (list, tuple))
+                and len(offsets) == 2
+                and all(isinstance(value, int) for value in offsets)
+            ):
+                continue
+            start, end = offsets
+            if start < 0 or end <= start or end > len(text):
+                continue
+            highlighted = clean_wiktionary_example_text(text[start:end]).casefold()
+            if not highlighted:
+                continue
+            highlighted_parts = [
+                part.strip() for part in parts if highlighted in part.casefold()
+            ]
+            if highlighted_parts:
+                highlighted_parts.sort(key=len)
+                selected = highlighted_parts[0]
+                break
+
+    if not selected:
+        matching = [part.strip() for part in parts if pattern.search(part)]
+        if matching:
+            # Prefer the shortest matching sentence that is long enough to be
+            # a real example, so the cloze prompt stays focused.
+            matching.sort(key=len)
+            selected = next(
+                (candidate for candidate in matching if len(candidate) >= 6),
+                matching[0],
+            )
+
+    if not selected:
         # Target word only appears across a sentence boundary; leave the full
         # text so the caller's usability check can decide.
         return cleaned
 
-    # Prefer the shortest matching sentence that is long enough to be a real
-    # example, so the cloze prompt stays focused.
-    matching.sort(key=len)
-    for candidate in matching:
-        if len(candidate) >= 6:
-            return candidate
-    return matching[0]
+    prefix_omitted = not cleaned.startswith(selected)
+    suffix_omitted = not cleaned.endswith(selected)
+
+    # Keep a readable window around the actual target.  This is stored as an
+    # explicitly marked excerpt and is used only when no complete example is
+    # available for the same word and part of speech.
+    max_chars = 220
+    if len(selected) > max_chars:
+        target_match = re.search(re.escape(highlighted), selected, re.IGNORECASE) if highlighted else None
+        if target_match is None:
+            target_match = pattern.search(selected)
+        target_start = target_match.start() if target_match else len(selected) // 2
+        target_end = target_match.end() if target_match else target_start
+        half = (max_chars - max(1, target_end - target_start)) // 2
+        start = max(0, target_start - half)
+        end = min(len(selected), target_end + half)
+        if start > 0:
+            boundary = selected.find(" ", start)
+            if boundary != -1 and boundary < target_start:
+                start = boundary + 1
+        if end < len(selected):
+            boundary = selected.rfind(" ", target_end, end)
+            if boundary != -1:
+                end = boundary
+        prefix_omitted = prefix_omitted or start > 0
+        suffix_omitted = suffix_omitted or end < len(selected)
+        selected = selected[start:end].strip()
+
+    if prefix_omitted:
+        selected = f"… {selected}"
+    if suffix_omitted:
+        selected = f"{selected} …"
+    return selected
 
 
 def usable_wiktionary_example(sentence: str, word: str) -> bool:
@@ -822,6 +924,15 @@ def usable_wiktionary_example(sentence: str, word: str) -> bool:
     if contains_blocked_example_word(stripped):
         return False
     if contains_archaic_english(stripped):
+        return False
+    # Quotations sometimes preserve expressive spellings such as
+    # "maaaaaaaybe" without an example-level informal tag.  They are valid
+    # prose but poor spelling models for learners.
+    if re.search(r"([A-Za-z])\1{3,}", stripped, re.IGNORECASE):
+        return False
+    if re.search(r"\b(?:gonna|outta|wanna|gotta|ain['’]t)\b", stripped, re.IGNORECASE):
+        return False
+    if re.search(r"\b(?:he|she|it)\s+don['’]t\b", stripped, re.IGNORECASE):
         return False
     if len(stripped) < 6 or len(stripped) > 500:
         return False
@@ -850,14 +961,10 @@ def wiktionary_example_rank(example: dict[str, object], sentence: str) -> int:
 
 
 def example_note_from_tags(sense_tags: str | None) -> str | None:
-    """Return a short note (e.g. 'archaic usage') if the example's sense carries
-    a notable tag, so cloze practice can warn the learner that the sentence may
-    read oddly. Returns None for ordinary examples."""
+    """Expose the source's non-grammatical usage/domain labels verbatim."""
     if not sense_tags:
         return None
-    tags = {tag.strip().lower() for tag in str(sense_tags).split(",") if tag.strip()}
-    labels = [label for tag, label in NOTABLE_EXAMPLE_TAGS.items() if tag in tags]
-    return "; ".join(labels) if labels else None
+    return wiktionary_usage_label(str(sense_tags)) or None
 
 
 def simplify_chinese(text: str | None) -> str | None:
@@ -878,7 +985,7 @@ def parse_word_file(filename: str, raw: bytes) -> tuple[list[dict[str, str]], li
 
 def normalize_entry(row: list[str], line_number: int) -> tuple[dict[str, str] | None, str | None]:
     if len(row) < 3:
-        return None, f"Line {line_number}: expected word, part of speech, and meaning."
+        return None, f"第 {line_number} 行：需要提供单词、词性和中文释义。"
 
     word = row[0].strip()
     part_of_speech = normalize_user_pos(row[1].strip())
@@ -887,7 +994,7 @@ def normalize_entry(row: list[str], line_number: int) -> tuple[dict[str, str] | 
     example_translation = row[4].strip() if len(row) > 4 else ""
 
     if not word or not part_of_speech or not meaning:
-        return None, f"Line {line_number}: word, part of speech, and meaning are required."
+        return None, f"第 {line_number} 行：单词、词性和中文释义不能为空。"
 
     entry = {"word": word, "part_of_speech": part_of_speech, "meaning": meaning}
     if example_sentence:
@@ -897,7 +1004,7 @@ def normalize_entry(row: list[str], line_number: int) -> tuple[dict[str, str] | 
             if example_translation:
                 entry["example_translation"] = example_translation
         else:
-            return entry, f"Line {line_number}: example sentence ignored because it does not contain the target word."
+            return entry, f"第 {line_number} 行：例句不包含目标单词，已忽略该例句。"
     return entry, None
 
 
@@ -940,21 +1047,146 @@ def parse_csv(text: str) -> tuple[list[dict[str, str]], list[str]]:
     return entries, errors
 
 
+TXT_HEADWORD_RE = re.compile(
+    r"^[A-Za-z][A-Za-z'’.-]*(?:[ -][A-Za-z][A-Za-z'’.-]*)*$"
+)
+TXT_BLOCK_POS_RE = re.compile(
+    r"(?<!\S)(proper\s+noun|adjective|adverb|preposition|conjunction|"
+    r"interjection|pronoun|abbreviation|determiner|auxiliary|noun|verb|"
+    r"prefix|suffix|numeral|phrase|initialism|acronym|article|modal|"
+    r"abbr|abbrev|interj|intj|pron|prep|conj|adj|adv|aux|det|pref|"
+    r"suff|suf|num|noun|verb|vt|vi|n|v|a|s|r)\.?(?=\s)",
+    re.IGNORECASE,
+)
+
+
+def _dictionary_block_senses(text: str) -> list[tuple[str, str]]:
+    """Split ``n. meaning adj. meaning`` into normalized POS/gloss pairs."""
+    normalized = text.strip()
+    matches = list(TXT_BLOCK_POS_RE.finditer(normalized))
+    if not matches or matches[0].start() != 0:
+        return []
+
+    senses: list[tuple[str, str]] = []
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(normalized)
+        meaning = normalized[match.end():end].strip(" \t;；")
+        if meaning:
+            senses.append((normalize_user_pos(match.group(1)), meaning))
+    return senses
+
+
+def _append_dictionary_senses(
+    entries: list[dict[str, str]],
+    errors: list[str],
+    word: str,
+    sense_text: str,
+    line_number: int,
+) -> int:
+    senses = _dictionary_block_senses(sense_text)
+    for part_of_speech, meaning in senses:
+        entry, error = normalize_entry(
+            [word, part_of_speech, meaning], line_number
+        )
+        if entry:
+            existing = next(
+                (
+                    candidate
+                    for candidate in reversed(entries)
+                    if candidate["word"].casefold() == word.casefold()
+                    and candidate["part_of_speech"] == part_of_speech
+                ),
+                None,
+            )
+            if existing:
+                existing["meaning"] = merge_text_values(
+                    existing["meaning"], meaning
+                ) or meaning
+            else:
+                entries.append(entry)
+        if error:
+            errors.append(error)
+    return len(senses)
+
+
 def parse_text_lines(text: str) -> tuple[list[dict[str, str]], list[str]]:
+    """Parse both column-oriented TXT and common copied dictionary blocks.
+
+    Existing tab, pipe, and comma rows remain supported. A bare English
+    headword can additionally be followed by one or more POS-prefixed lines,
+    including multiple senses on one line, for example::
+
+        accessory
+            n. 同谋，帮凶 adj. 附属的
+    """
     entries: list[dict[str, str]] = []
     errors: list[str] = []
+    pending_word = ""
+    pending_line = 0
+    pending_sense_count = 0
 
-    for index, line in enumerate(text.splitlines(), start=1):
-        stripped = line.strip()
+    def finish_pending() -> None:
+        nonlocal pending_word, pending_line, pending_sense_count
+        if pending_word and pending_sense_count == 0:
+            errors.append(f"第 {pending_line} 行：单词“{pending_word}”后没有可识别的词性和释义。")
+        pending_word = ""
+        pending_line = 0
+        pending_sense_count = 0
+
+    for index, raw_line in enumerate(text.splitlines(), start=1):
+        stripped = raw_line.strip()
         if not stripped or stripped.startswith("#"):
             continue
 
-        if "\t" in stripped:
-            row = stripped.split("\t", 4)
-        elif "|" in stripped:
-            row = stripped.split("|", 4)
-        else:
+        # A POS-prefixed line belongs to the most recent bare headword.
+        block_senses = _dictionary_block_senses(stripped)
+        if block_senses:
+            if not pending_word:
+                errors.append(f"第 {index} 行：词性释义前缺少对应的英文单词。")
+                continue
+            pending_sense_count += _append_dictionary_senses(
+                entries, errors, pending_word, stripped, index
+            )
+            continue
+
+        delimiter = "\t" if "\t" in stripped else "|" if "|" in stripped else ""
+        if delimiter:
+            row = stripped.split(delimiter, 4)
+            # Also accept: accessory<TAB>n. 同谋，帮凶 adj. 附属的
+            if (
+                len(row) == 2
+                and TXT_HEADWORD_RE.fullmatch(row[0].strip())
+                and _dictionary_block_senses(row[1].strip())
+            ):
+                finish_pending()
+                _append_dictionary_senses(
+                    entries, errors, row[0].strip(), row[1].strip(), index
+                )
+                continue
+            finish_pending()
+        elif "," in stripped:
             row = re.split(r"\s*,\s*", stripped, maxsplit=4)
+            finish_pending()
+        else:
+            # A complete copied-dictionary block may also fit on one line.
+            marker = TXT_BLOCK_POS_RE.search(stripped)
+            if marker and marker.start() > 0:
+                word = stripped[:marker.start()].strip()
+                if TXT_HEADWORD_RE.fullmatch(word):
+                    finish_pending()
+                    _append_dictionary_senses(
+                        entries, errors, word, stripped[marker.start():], index
+                    )
+                    continue
+
+            if TXT_HEADWORD_RE.fullmatch(stripped):
+                finish_pending()
+                pending_word = stripped
+                pending_line = index
+                continue
+
+            finish_pending()
+            row = [stripped]
 
         entry, error = normalize_entry(row, index)
         if entry:
@@ -962,8 +1194,9 @@ def parse_text_lines(text: str) -> tuple[list[dict[str, str]], list[str]]:
         if error:
             errors.append(error)
 
+    finish_pending()
     if not entries and not errors:
-        errors.append("The file does not contain any usable words.")
+        errors.append("文件中没有可用的词条。")
 
     return entries, errors
 

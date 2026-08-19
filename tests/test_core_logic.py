@@ -129,8 +129,19 @@ def test_unlabeled_wiktionary_definitions_are_kept():
 
 
 def test_wiktionary_usage_labels_are_concise_and_deduplicated():
-    assert app.wiktionary_usage_label("US,slang") == "美式 · 俚语"
-    assert app.wiktionary_usage_label("British,colloquial,informal") == "英式 · 非正式"
+    assert app.wiktionary_usage_label("US,slang") == "US · slang"
+    assert app.wiktionary_usage_label("British,colloquial,informal") == "british · colloquial · informal"
+    assert app.wiktionary_usage_label("nautical,in-compounds") == "nautical · in compounds"
+    assert app.wiktionary_usage_label("often,often-with-down,with-down") == "often with down"
+    assert app.wiktionary_usage_label("proscribed,sometimes,sometimes-proscribed") == "sometimes proscribed"
+
+
+def test_wiktionary_math_definition_is_readable_plain_text():
+    raw = "Given an n×n matrix a_ij,, the sum over all permutations π, of ∏ᵢ₌₁ⁿa_iπ(i)."
+    assert app.wiktionary_definition_display(raw) == (
+        "Given an n × n matrix A = (a(i, j)), the sum over all permutations π "
+        "of the product from i = 1 to n of a(i, π(i))."
+    )
 
 
 def test_ecdict_translation_does_not_attach_inflection_notes_to_adjectives():
@@ -141,6 +152,41 @@ def test_ecdict_translation_does_not_attach_inflection_notes_to_adjectives():
     ]
     assert app.split_ecdict_translation(beat, "adj") == [
         ("adj", "疲乏的, 颓废的")
+    ]
+
+
+def test_ecdict_preset_merges_transitive_and_intransitive_meanings(monkeypatch):
+    raw = (
+        "word,phonetic,definition,translation,pos,collins,oxford,tag,bnc,frq,exchange,detail,audio\n"
+        "obtain,əb'tein,v. come into possession of,\"vt. 获得, 达到\\nvi. 流行, 得到公认\",v,3,1,cet6,793,1595,,,\n"
+        "shock,ʃɒk,a. unexpected,\"a. 蓬乱浓密的\",adj,4,1,cet6,100,200,,,\n"
+    ).encode()
+    monkeypatch.setattr(app, "load_ecdict_data", lambda: raw)
+
+    with app.app.app_context():
+        app.init_db()
+        db = app.get_db()
+        db.execute("DROP TABLE IF EXISTS ecdict_lookup")
+        db.execute("DROP TABLE IF EXISTS ecdict_preset_entries")
+        db.execute("DELETE FROM metadata WHERE key = 'ecdict_lookup_signature'")
+        db.commit()
+        app.ensure_ecdict_lookup_index()
+        rows = db.execute(
+            "SELECT word, part_of_speech, meaning FROM ecdict_preset_entries "
+            "WHERE word IN ('obtain', 'shock') ORDER BY word"
+        ).fetchall()
+
+    assert [dict(row) for row in rows] == [
+        {
+            "word": "obtain",
+            "part_of_speech": "v",
+            "meaning": "获得, 达到；流行, 得到公认",
+        },
+        {
+            "word": "shock",
+            "part_of_speech": "adj",
+            "meaning": "令人震惊的, 突如其来的",
+        },
     ]
 
 
@@ -240,6 +286,63 @@ def test_parse_text_lines_skips_comments_and_blanks():
     text = "# a comment\n\nabandon\tverb\t放弃\n"
     entries, _ = app.parse_text_lines(text)
     assert len(entries) == 1
+
+
+def test_parse_text_lines_dictionary_block_splits_multiple_parts_of_speech():
+    text = "accessory\n\tn. 同谋，帮凶 adj. 附属的\n"
+    entries, errors = app.parse_text_lines(text)
+    assert errors == []
+    assert entries == [
+        {"word": "accessory", "part_of_speech": "n", "meaning": "同谋，帮凶"},
+        {"word": "accessory", "part_of_speech": "adj", "meaning": "附属的"},
+    ]
+
+
+def test_parse_text_lines_dictionary_block_accepts_one_sense_per_line():
+    text = "account for\n  v. 解释；占据\n  phrase. 是……的原因\n"
+    entries, errors = app.parse_text_lines(text)
+    assert errors == []
+    assert [(entry["part_of_speech"], entry["meaning"]) for entry in entries] == [
+        ("v", "解释；占据"),
+        ("phrase", "是……的原因"),
+    ]
+
+
+def test_parse_text_lines_accepts_two_column_dictionary_export():
+    text = "accessory\tn. 同谋，帮凶 adj. 附属的\n"
+    entries, errors = app.parse_text_lines(text)
+    assert len(entries) == 2
+    assert errors == []
+
+
+def test_parse_text_lines_accepts_inline_dictionary_entry():
+    entries, errors = app.parse_text_lines("accessory n. 同谋，帮凶 adj. 附属的")
+    assert len(entries) == 2
+    assert errors == []
+
+
+def test_parse_text_lines_reports_orphan_headword_and_orphan_sense():
+    entries, errors = app.parse_text_lines("orphan\nabandon|v|放弃\nn. 孤儿\n")
+    assert entries == [{"word": "abandon", "part_of_speech": "v", "meaning": "放弃"}]
+    assert any("orphan" in error for error in errors)
+    assert any("缺少对应的英文单词" in error for error in errors)
+
+
+def test_parse_text_lines_merges_repeated_parts_in_one_dictionary_block():
+    text = "set\n n. 一套；一组\n n. 集合\n v. 放置\n"
+    entries, errors = app.parse_text_lines(text)
+    assert errors == []
+    assert entries == [
+        {"word": "set", "part_of_speech": "n", "meaning": "一套；一组；集合"},
+        {"word": "set", "part_of_speech": "v", "meaning": "放置"},
+    ]
+
+
+def test_parse_text_lines_can_mix_legacy_rows_and_dictionary_blocks():
+    text = "abandon|v|放弃\naccessory\n n. 同谋 adj. 附属的\nability,n,能力\n"
+    entries, errors = app.parse_text_lines(text)
+    assert errors == []
+    assert len(entries) == 4
 
 
 # --- next_review_date ------------------------------------------------------
@@ -368,11 +471,55 @@ def test_extract_prefers_shortest_matching_sentence():
     text = ("Reliability matters. Punctuality and reliability remain the bedrock "
             "of a successful national railway network over many decades.")
     out = app.extract_example_sentence(text, "reliability")
-    assert out == "Reliability matters."
+    assert out == "Reliability matters. …"
 
 
 def test_extract_empty_text():
     assert app.extract_example_sentence("", "walk") == ""
+
+
+def test_extract_uses_wiktionary_highlight_instead_of_bare_headword():
+    text = (
+        "When I was young and full of grace, I sprited a rattlesnake. "
+        "When I was young, a fever fell my spirit; I will not tell. "
+        "You're on your honor not to tell."
+    )
+    start = text.index("sprited")
+    extracted = app.extract_example_sentence(
+        text, "spirit", [[start, start + len("sprited")]]
+    )
+
+    assert extracted == "When I was young and full of grace, I sprited a rattlesnake. …"
+    assert not app.usable_wiktionary_example(extracted, "spirit")
+
+
+def test_extract_does_not_split_common_title_abbreviation():
+    text = (
+        "God does not appear, but the Devil (Ms. Pinal) emphatically does, "
+        "and finally succeeds in spiriting Simon off to Manhattan."
+    )
+    start = text.index("spiriting")
+
+    extracted = app.extract_example_sentence(
+        text, "spirit", [[start, start + len("spiriting")]]
+    )
+
+    assert extracted.startswith("God does not appear")
+    assert "Ms. Pinal" in extracted
+
+
+def test_long_excerpt_is_centered_and_marks_both_omissions():
+    text = "Opening context " + "before " * 35 + "spiriting Simon off " + "after " * 35
+    start = text.index("spiriting")
+
+    extracted = app.extract_example_sentence(
+        text, "spirit", [[start, start + len("spiriting")]]
+    )
+
+    assert extracted.startswith("… ")
+    assert extracted.endswith(" …")
+    assert "spiriting" in extracted
+    assert len(extracted) <= 225
 
 
 def test_long_single_sentence_common_word_is_usable():
@@ -382,6 +529,18 @@ def test_long_single_sentence_common_word_is_usable():
             "coming year, versus those who thought otherwise entirely today.")
     extracted = app.extract_example_sentence(text, "cooperate")
     assert app.usable_wiktionary_example(extracted, "cooperate")
+
+
+def test_stylized_and_historical_spellings_are_not_learner_examples():
+    assert not app.usable_wiktionary_example(
+        "And maaaaaaaybe Superman would be a good hang.", "hang"
+    )
+    assert not app.usable_wiktionary_example(
+        "All day to mount the trench, to ſtorm the breach.", "storm"
+    )
+    assert not app.usable_wiktionary_example(
+        "If he don’t get outta my hood, I’m gonna cap his ass.", "cap"
+    )
 
 
 # --- spelling_variants (regression: British/American spelling) -------------
@@ -459,15 +618,15 @@ def test_wiktionary_example_filter_catches_untagged_archaic_quotation():
 # --- example_note_from_tags (regression: archaic example warning) ----------
 
 def test_example_note_from_tags_flags_archaic():
-    assert app.example_note_from_tags("archaic") == "archaic usage"
+    assert app.example_note_from_tags("archaic") == "archaic"
     assert app.example_note_from_tags("obsolete,rare") is not None
-    assert "obsolete usage" in app.example_note_from_tags("obsolete")
+    assert "obsolete" in app.example_note_from_tags("obsolete")
 
 
 def test_example_note_from_tags_ignores_ordinary():
     assert app.example_note_from_tags(None) is None
     assert app.example_note_from_tags("") is None
-    assert app.example_note_from_tags("transitive,informal") is None
+    assert app.example_note_from_tags("transitive,informal") == "informal"
 
 
 # --- truncate_cloze_prompt -------------------------------------------------

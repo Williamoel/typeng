@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TypEng · {{ '登录' if auth_mode == 'login' else '注册' }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='9') }}">
+</head>
+<body class="auth-page">
+  <main class="auth-shell">
+    <aside class="auth-brand-panel">
+      <a class="brand" href="{{ url_for('login') }}">TypEng</a>
+      <p>TYPE · LEARN</p>
+    </aside>
+    <section class="auth-form-panel">
+      <nav class="auth-tabs" aria-label="账户操作">
+        <a class="{% if auth_mode == 'login' %}active{% endif %}" href="{{ url_for('login') }}">登录</a>
+        <a class="{% if auth_mode == 'register' %}active{% endif %}" href="{{ url_for('register') }}">注册</a>
+      </nav>
+      <div class="auth-copy">
+        <h1>{{ '继续学习' if auth_mode == 'login' else '创建账户' }}</h1>
+        <p>{{ '输入用户名和密码进入自己的学习空间。' if auth_mode == 'login' else '用户名支持中文和英文，密码至少 6 位。' }}</p>
+      </div>
+      <form action="{{ url_for(auth_mode) }}" method="post" autocomplete="{{ 'on' if auth_mode == 'login' else 'off' }}">
+        {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
+        <label for="username">用户名</label>
+        <input id="username" name="username" type="text" value="{{ username }}" maxlength="32" pattern="[A-Za-z0-9_\u3400-\u9FFF]{1,32}" autocomplete="username" autofocus required>
+        <label for="password">密码</label>
+        <input id="password" name="password" type="password" minlength="6" maxlength="256" autocomplete="{{ 'current-password' if auth_mode == 'login' else 'new-password' }}" required>
+        {% if error %}<p class="auth-error" role="alert">{{ error }}</p>{% endif %}
+        <button type="submit">{{ '登录' if auth_mode == 'login' else '注册并进入' }}</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

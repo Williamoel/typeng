@@ -9,7 +9,7 @@ import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
-from ..constants import ECDICT_PRESET_LIBRARIES
+from ..constants import ECDICT_MEANING_CORRECTIONS, ECDICT_PRESET_LIBRARIES
 from ..domain import (
     format_ecdict_definition,
     infer_ecdict_fallback_pos,
@@ -218,7 +218,8 @@ def ensure_ecdict_lookup_index() -> None:
             phonetic TEXT,
             definition TEXT,
             frequency INTEGER,
-            source_tags TEXT
+            source_tags TEXT,
+            UNIQUE(word, part_of_speech)
         )
         """
     )
@@ -266,6 +267,20 @@ def ensure_ecdict_lookup_index() -> None:
                     definition, frequency, source_tags
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(word, part_of_speech) DO UPDATE SET
+                    meaning = CASE
+                        WHEN instr(ecdict_preset_entries.meaning, excluded.meaning) > 0
+                            THEN ecdict_preset_entries.meaning
+                        ELSE ecdict_preset_entries.meaning || '；' || excluded.meaning
+                    END,
+                    phonetic = COALESCE(ecdict_preset_entries.phonetic, excluded.phonetic),
+                    definition = COALESCE(ecdict_preset_entries.definition, excluded.definition),
+                    frequency = CASE
+                        WHEN ecdict_preset_entries.frequency IS NULL THEN excluded.frequency
+                        WHEN excluded.frequency IS NULL THEN ecdict_preset_entries.frequency
+                        ELSE MIN(ecdict_preset_entries.frequency, excluded.frequency)
+                    END,
+                    source_tags = COALESCE(ecdict_preset_entries.source_tags, excluded.source_tags)
                 """,
                 preset_rows,
             )
@@ -285,10 +300,14 @@ def ensure_ecdict_lookup_index() -> None:
                 normalized.get("translation", ""), fallback_pos
             ):
                 if entry_meaning:
+                    normalized_part = normalize_user_pos(part_of_speech)
+                    entry_meaning = ECDICT_MEANING_CORRECTIONS.get(
+                        (word_key, normalized_part), entry_meaning
+                    )
                     preset_rows.append(
                         (
                             word,
-                            normalize_user_pos(part_of_speech),
+                            normalized_part,
                             entry_meaning,
                             normalized.get("phonetic") or None,
                             format_ecdict_definition(normalized.get("definition", "")) or None,

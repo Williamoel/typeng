@@ -17,6 +17,7 @@ from .domain import (
 )
 from .lexicon_cache import install_prebuilt_cache
 from .repositories.lexicon import sync_learning_word
+from .repositories.units import assign_unassigned
 
 
 def table_columns(db: sqlite3.Connection, table_name: str) -> set[str]:
@@ -363,14 +364,132 @@ def create_lexical_tables(db: sqlite3.Connection) -> None:
             FOREIGN KEY(word_id) REFERENCES words(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS word_patterns (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            word_id INTEGER NOT NULL,
+            expression TEXT NOT NULL,
+            definition TEXT,
+            sense_rank INTEGER,
+            usage_label TEXT,
+            source TEXT NOT NULL DEFAULT 'user',
+            enabled_for_cloze INTEGER NOT NULL DEFAULT 1,
+            rank INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(word_id, expression, source),
+            FOREIGN KEY(word_id) REFERENCES words(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS cloze_feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            feedback_token TEXT NOT NULL UNIQUE,
+            library_id INTEGER,
+            user_id INTEGER,
+            word_id INTEGER,
+            word TEXT NOT NULL,
+            part_of_speech TEXT NOT NULL,
+            sentence TEXT NOT NULL,
+            sentence_hash TEXT NOT NULL,
+            material_type TEXT NOT NULL DEFAULT 'example',
+            material_source TEXT,
+            rating TEXT NOT NULL CHECK (
+                rating IN ('too_hard', 'too_easy', 'unsuitable', 'incorrect')
+            ),
+            answer_correct INTEGER NOT NULL DEFAULT 0,
+            practice_mode TEXT NOT NULL DEFAULT 'normal',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(library_id) REFERENCES libraries(id) ON DELETE SET NULL,
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL,
+            FOREIGN KEY(word_id) REFERENCES words(id) ON DELETE SET NULL
+        );
+
         CREATE INDEX IF NOT EXISTS idx_senses_lexeme_pos
             ON senses(lexeme_id, part_of_speech);
         CREATE INDEX IF NOT EXISTS idx_examples_sense_rank
             ON sense_examples(sense_id, rank, id);
         CREATE INDEX IF NOT EXISTS idx_word_examples_source_rank
             ON word_examples(word_id, source, rank, id);
+        CREATE INDEX IF NOT EXISTS idx_word_patterns_source_rank
+            ON word_patterns(word_id, source, rank, id);
+        CREATE INDEX IF NOT EXISTS idx_cloze_feedback_sentence_rating
+            ON cloze_feedback(sentence_hash, rating, created_at);
         """
     )
+
+
+def create_account_tables(db: sqlite3.Connection) -> None:
+    db.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            username_key TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            last_login_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS registration_attempts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            device_hash TEXT NOT NULL,
+            attempted_on TEXT NOT NULL,
+            success INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_registration_attempts_device_day
+            ON registration_attempts(device_hash, attempted_on);
+        """
+    )
+
+
+def migrate_library_ownership(db: sqlite3.Connection) -> None:
+    """Add per-user library ownership and replace the old global name key."""
+    if "user_id" in table_columns(db, "libraries"):
+        return
+
+    # SQLite cannot drop the old UNIQUE(name) constraint in place. Rebuild the
+    # parent table while FK enforcement is temporarily disabled; child tables
+    # continue to reference the final `libraries` table name.
+    db.commit()
+    db.execute("PRAGMA foreign_keys = OFF")
+    try:
+        db.execute("BEGIN")
+        db.execute(
+            """
+            CREATE TABLE libraries_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                name TEXT NOT NULL,
+                review_target_count INTEGER NOT NULL DEFAULT 3,
+                wrong_review_target_count INTEGER NOT NULL DEFAULT 3,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, name),
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """
+        )
+        db.execute(
+            """
+            INSERT INTO libraries_new (
+                id, user_id, name, review_target_count,
+                wrong_review_target_count, created_at, updated_at
+            )
+            SELECT id, NULL, name, review_target_count,
+                   wrong_review_target_count, created_at, updated_at
+            FROM libraries
+            """
+        )
+        db.execute("DROP TABLE libraries")
+        db.execute("ALTER TABLE libraries_new RENAME TO libraries")
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.execute("PRAGMA foreign_keys = ON")
 
 
 def backfill_lexical_model(db: sqlite3.Connection) -> None:
@@ -389,6 +508,7 @@ def backfill_lexical_model(db: sqlite3.Connection) -> None:
 
 
 def migrate_db(db: sqlite3.Connection, app_schema_version: int) -> None:
+    create_account_tables(db)
     db.execute(
         """
         INSERT OR IGNORE INTO libraries (id, name)
@@ -405,6 +525,7 @@ def migrate_db(db: sqlite3.Connection, app_schema_version: int) -> None:
         db.execute(
             f"ALTER TABLE libraries ADD COLUMN wrong_review_target_count INTEGER NOT NULL DEFAULT {DEFAULT_WRONG_REVIEW_TARGET_COUNT}"
         )
+    migrate_library_ownership(db)
 
     columns = table_columns(db, "words")
     if "library_id" not in columns:
@@ -424,6 +545,8 @@ def migrate_db(db: sqlite3.Connection, app_schema_version: int) -> None:
                 frequency INTEGER,
                 source TEXT,
                 source_tags TEXT,
+                unit_number INTEGER,
+                unit_position INTEGER,
                 status TEXT NOT NULL DEFAULT 'new',
                 wrong_correct_count INTEGER NOT NULL DEFAULT 0,
                 wrong_next_review_at TEXT,
@@ -465,6 +588,8 @@ def migrate_db(db: sqlite3.Connection, app_schema_version: int) -> None:
         "frequency": "ALTER TABLE words ADD COLUMN frequency INTEGER",
         "source": "ALTER TABLE words ADD COLUMN source TEXT",
         "source_tags": "ALTER TABLE words ADD COLUMN source_tags TEXT",
+        "unit_number": "ALTER TABLE words ADD COLUMN unit_number INTEGER",
+        "unit_position": "ALTER TABLE words ADD COLUMN unit_position INTEGER",
         "wrong_next_review_at": "ALTER TABLE words ADD COLUMN wrong_next_review_at TEXT",
         "review_correct_count": "ALTER TABLE words ADD COLUMN review_correct_count INTEGER NOT NULL DEFAULT 0",
         "review_stage": "ALTER TABLE words ADD COLUMN review_stage INTEGER NOT NULL DEFAULT 0",
@@ -509,6 +634,10 @@ def migrate_db(db: sqlite3.Connection, app_schema_version: int) -> None:
         migrate_inferred_phrase_entries(db)
 
     create_lexical_tables(db)
+    feedback_columns = table_columns(db, "cloze_feedback")
+    if "user_id" not in feedback_columns:
+        db.execute("ALTER TABLE cloze_feedback ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE SET NULL")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_cloze_feedback_user_created ON cloze_feedback(user_id, created_at)")
     if current_version < 2:
         backfill_lexical_model(db)
     if current_version < 3:
@@ -562,6 +691,31 @@ def migrate_db(db: sqlite3.Connection, app_schema_version: int) -> None:
     if 1 <= current_version < 5:
         merge_verb_part_duplicates(db)
 
+    # v6 freezes the former virtual 100-word pages into stable organizational
+    # units. Deleting a few words no longer pulls entries from the next unit.
+    if current_version < 6:
+        assign_unassigned(db)
+
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS library_units (
+            library_id INTEGER NOT NULL,
+            unit_number INTEGER NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (library_id, unit_number),
+            FOREIGN KEY(library_id) REFERENCES libraries(id) ON DELETE CASCADE
+        )
+        """
+    )
+    if current_version < 7:
+        db.execute(
+            """
+            INSERT OR IGNORE INTO library_units (library_id, unit_number)
+            SELECT DISTINCT library_id, unit_number FROM words
+            WHERE unit_number IS NOT NULL
+            """
+        )
+
     db.execute("CREATE INDEX IF NOT EXISTS idx_words_library_status_id ON words(library_id, status, id)")
     db.execute(
         "CREATE INDEX IF NOT EXISTS idx_words_due_review "
@@ -572,6 +726,10 @@ def migrate_db(db: sqlite3.Connection, app_schema_version: int) -> None:
         "ON words(library_id, status, wrong_next_review_at, wrong_correct_count)"
     )
     db.execute("CREATE INDEX IF NOT EXISTS idx_words_library_frequency ON words(library_id, frequency, id)")
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_words_library_unit "
+        "ON words(library_id, unit_number, unit_position)"
+    )
     db.execute(
         "INSERT INTO metadata (key, value) VALUES ('app_schema_version', ?) "
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -596,15 +754,19 @@ def initialize(
     app_schema_version: int,
 ) -> None:
     ensure_metadata_table(db)
+    create_account_tables(db)
     db.execute(
         """
         CREATE TABLE IF NOT EXISTS libraries (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
+            user_id INTEGER,
+            name TEXT NOT NULL,
             review_target_count INTEGER NOT NULL DEFAULT 3,
             wrong_review_target_count INTEGER NOT NULL DEFAULT 3,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, name),
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
         )
         """
     )
@@ -625,6 +787,8 @@ def initialize(
             frequency INTEGER,
             source TEXT,
             source_tags TEXT,
+            unit_number INTEGER,
+            unit_position INTEGER,
             status TEXT NOT NULL DEFAULT 'new',
             wrong_correct_count INTEGER NOT NULL DEFAULT 0,
             wrong_next_review_at TEXT,

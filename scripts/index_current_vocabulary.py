@@ -39,7 +39,11 @@ def main() -> None:
         indexed = int(db.execute("SELECT COUNT(*) FROM wiktionary_indexed_words").fetchone()[0])
         examples = int(db.execute("SELECT COUNT(*) FROM wiktionary_examples").fetchone()[0])
         definitions = int(db.execute("SELECT COUNT(*) FROM wiktionary_definitions").fetchone()[0])
-        print(f"Done: {indexed:,} indexed words, {definitions:,} definitions, {examples:,} examples.")
+        patterns = int(db.execute("SELECT COUNT(*) FROM wiktionary_patterns").fetchone()[0])
+        print(
+            f"Done: {indexed:,} indexed words, {definitions:,} definitions, "
+            f"{examples:,} examples, {patterns:,} fixed expressions."
+        )
 
 
 if __name__ == "__main__":
