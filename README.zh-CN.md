@@ -6,7 +6,7 @@
 
 一款极简、开源的英语词汇学习工具，核心是键盘主动拼写、按词性对齐的释义，以及语境填空训练。
 
-[English](README.md) · [下载最新版本](https://github.com/Williamoel/typeng/releases/latest) · [数据来源](SOURCES.md)
+[English](README.md) · [下载最新版本](https://github.com/PeiyanTang/typeng/releases/latest) · [数据来源](SOURCES.md)
 
 ![TypEng 网站工作区](docs/design/web-cloze-feedback-concept.png)
 
@@ -45,7 +45,7 @@ TypEng 现在既可以作为本地应用使用，也可以部署成公开网站�
 推荐 Python 3.12：
 
 ```bash
-git clone https://github.com/Williamoel/typeng.git
+git clone https://github.com/PeiyanTang/typeng.git
 cd typeng
 python -m venv .venv
 source .venv/bin/activate
@@ -55,7 +55,7 @@ python app.py
 
 浏览器打开 `http://127.0.0.1:5000`。本地模式不显示登录页面，只接受当前电脑访问，数据保存在系统对应的 TypEng 数据目录中。
 
-Windows、macOS 和 Linux 的免配置桌面包会附在每个 [GitHub Release](https://github.com/Williamoel/typeng/releases/latest) 中。
+Windows、macOS 和 Linux 的免配置桌面包会附在每个 [GitHub Release](https://github.com/PeiyanTang/typeng/releases/latest) 中。
 
 ## 在本机体验账号网站模式
 

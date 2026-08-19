@@ -19,7 +19,7 @@ services:
       - key: TYPENG_LEXICON_PATH
         value: /var/lib/typeng/lexicon/typeng-lexicon.sqlite3
       - key: TYPENG_LEXICON_URL
-        value: https://github.com/Williamoel/typeng/releases/latest/download/typeng-lexicon.sqlite3
+        value: https://github.com/PeiyanTang/typeng/releases/latest/download/typeng-lexicon.sqlite3
     disk:
       name: typeng-data
       mountPath: /var/lib/typeng

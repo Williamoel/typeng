@@ -120,4 +120,4 @@ Wiktionary 能大幅提升例句的数量和质量。它有约 3 GB，所以没�
 ---
 
 如果还有问题，欢迎在项目仓库提交 issue：
-https://github.com/Williamoel/typeng/issues
+https://github.com/PeiyanTang/typeng/issues

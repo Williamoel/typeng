@@ -25,7 +25,7 @@ TypEng 当前用 SQLite 保存账号、词库、学习进度和 Cloze 反馈。R
 
 1. 注册或登录 Render，并连接 GitHub。
 2. 选择 **New → Blueprint**。
-3. 选择 `Williamoel/typeng` 仓库。Render 会读取根目录中的 `render.yaml`。
+3. 选择 `PeiyanTang/typeng` 仓库。Render 会读取根目录中的 `render.yaml`。
 4. 确认配置包含：
    - Docker Runtime；
    - Starter 或其他付费 Web Service；

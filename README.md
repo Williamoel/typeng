@@ -7,7 +7,7 @@
 A minimalist, open-source English vocabulary trainer built around keyboard recall,
 part-of-speech-aligned definitions, and contextual cloze practice.
 
-[中文说明](README.zh-CN.md) · [Latest release](https://github.com/Williamoel/typeng/releases/latest) · [Data sources](SOURCES.md)
+[中文说明](README.zh-CN.md) · [Latest release](https://github.com/PeiyanTang/typeng/releases/latest) · [Data sources](SOURCES.md)
 
 ![TypEng web workspace](docs/design/web-cloze-feedback-concept.png)
 
@@ -58,7 +58,7 @@ licensing boundaries.
 Python 3.12 is recommended.
 
 ```bash
-git clone https://github.com/Williamoel/typeng.git
+git clone https://github.com/PeiyanTang/typeng.git
 cd typeng
 python -m venv .venv
 source .venv/bin/activate
@@ -70,7 +70,7 @@ Open `http://127.0.0.1:5000`. Local mode has no account screen and accepts only
 loopback traffic. Its data remains under the platform-specific TypEng data directory.
 
 Prebuilt desktop packages for Windows, macOS, and Linux are attached to each
-[GitHub release](https://github.com/Williamoel/typeng/releases/latest).
+[GitHub release](https://github.com/PeiyanTang/typeng/releases/latest).
 
 ## Run the account-enabled web mode
 

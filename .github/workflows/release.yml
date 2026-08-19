@@ -12,7 +12,7 @@ permissions:
 jobs:
   prepare-lexicon:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -44,9 +44,18 @@ jobs:
           mkdir -p "$BUILD_HOME/resources/wiktionary"
           cp resources/wiktionary/exam-pos-index.tsv \
             "$BUILD_HOME/resources/wiktionary/exam-pos-index.tsv"
+          cp resources/wiktionary/usage-patterns.tsv \
+            "$BUILD_HOME/resources/wiktionary/usage-patterns.tsv"
+          tail -n +2 resources/wiktionary/exam-pos-index.tsv \
+            | cut -f1 | sort -u > "$BUILD_HOME/wiktionary-words.txt"
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 15 \
+            --connect-timeout 30 --max-time 1800 \
+            -o "$BUILD_HOME/kaikki.org-dictionary-English.jsonl" \
+            "https://kaikki.org/dictionary/English/kaikki.org-dictionary-English.jsonl"
           python scripts/prepare_lexicon_cache.py \
             --build-home "$BUILD_HOME" \
-            --output resources/lexicon/typeng-lexicon.sqlite3
+            --output resources/lexicon/typeng-lexicon.sqlite3 \
+            --wiktionary-words "$BUILD_HOME/wiktionary-words.txt"
 
       - name: Upload runtime lexicon
         uses: actions/upload-artifact@v4
